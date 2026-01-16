@@ -5,3 +5,4 @@
 - Test two handed sculpting
 - Test hand sculpt head
 - Test mouth sculpt hand
+- Test entire body sculpting
