@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>3D Sculpting - Shape Selection</title>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+        font-family: sans-serif;
+        background-color: #222;
+        color: white;
+      }
+      #ui {
+        position: absolute;
+        top: 20px;
+        left: 20px;
+        background: rgba(0, 0, 0, 0.8);
+        padding: 15px;
+        border-radius: 8px;
+        pointer-events: auto;
+        width: 200px;
+        user-select: none;
+      }
+      h3 {
+        margin-top: 0;
+        margin-bottom: 10px;
+        font-size: 16px;
+        border-bottom: 1px solid #555;
+        padding-bottom: 5px;
+      }
+      h4 {
+        margin: 10px 0 5px 0;
+        font-size: 13px;
+        color: #ccc;
+      }
+
+      .btn-group {
+        display: flex;
+        gap: 5px;
+        margin-bottom: 5px;
+      }
+
+      button {
+        flex: 1;
+        padding: 8px;
+        cursor: pointer;
+        border: 1px solid #555;
+        background: #333;
+        color: white;
+        border-radius: 4px;
+        font-size: 12px;
+        transition: background 0.2s;
+      }
+      button:hover {
+        background: #555;
+      }
+      button.active {
+        background: #4caf50;
+        border-color: #4caf50;
+      }
+      button.shape-btn {
+        background: #2196f3;
+        border-color: #1976d2;
+      }
+      button.shape-btn:hover {
+        background: #42a5f5;
+      }
+
+      label {
+        display: block;
+        margin-top: 10px;
+        font-size: 12px;
+      }
+      input[type="range"] {
+        width: 100%;
+        cursor: pointer;
+      }
+
+      .instructions {
+        font-size: 11px;
+        color: #aaa;
+        margin-top: 15px;
+        line-height: 1.4;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="ui">
+      <h3>Sculpting Lab</h3>
+
+      <h4>Base Shape (Resets)</h4>
+      <div class="btn-group">
+        <button class="shape-btn" onclick="setShape('cube')">Cube</button>
+        <button class="shape-btn" onclick="setShape('sphere')">Sphere</button>
+        <button class="shape-btn" onclick="setShape('cylinder')">Cyl</button>
+      </div>
+
+      <h4>Tools</h4>
+      <button id="btn-pull" class="active" onclick="setTool('pull')">Pull (Add)</button>
+      <button id="btn-push" onclick="setTool('push')">Push (Indent)</button>
+      <button id="btn-pinch" onclick="setTool('pinch')">Pinch</button>
+
+      <label>Brush Radius</label>
+      <input type="range" min="0.1" max="1.0" step="0.05" value="0.4" id="radius-slider" />
+
+      <label>Intensity</label>
+      <input type="range" min="0.1" max="1.0" step="0.1" value="0.5" id="intensity-slider" />
+
+      <div class="instructions">
+        • <b>Left Click</b> to Sculpt<br />
+        • <b>Right Click</b> to Rotate<br />
+        • <b>Scroll</b> to Zoom
+      </div>
+    </div>
+
+    <!-- Import Three.js from CDN -->
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+          "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+      }
+    </script>
+
+    <script type="module">
+      import * as THREE from "three";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+      // --- Scene Setup ---
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x222222);
+
+      const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
+      camera.position.set(0, 0, 4);
+
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      document.body.appendChild(renderer.domElement);
+
+      // --- Lighting ---
+      const ambientLight = new THREE.AmbientLight(0x404040, 2);
+      scene.add(ambientLight);
+
+      const dirLight = new THREE.DirectionalLight(0xffffff, 2);
+      dirLight.position.set(5, 5, 5);
+      scene.add(dirLight);
+
+      const backLight = new THREE.DirectionalLight(0xffffff, 0.5);
+      backLight.position.set(-5, -5, -5);
+      scene.add(backLight);
+
+      // --- Material ---
+      const material = new THREE.MeshStandardMaterial({
+        color: 0xaa8866,
+        roughness: 0.6,
+        metalness: 0.1,
+        flatShading: false,
+      });
+
+      // --- Mesh Management ---
+      let mesh; // Global reference to the current sculpting mesh
+
+      window.setShape = (type) => {
+        // Remove existing mesh if it exists
+        if (mesh) {
+          scene.remove(mesh);
+          mesh.geometry.dispose();
+        }
+
+        let geometry;
+        const segments = 64; // High resolution for sculpting
+
+        switch (type) {
+          case "cube":
+            geometry = new THREE.BoxGeometry(2, 2, 2, segments, segments, segments);
+            break;
+          case "sphere":
+            geometry = new THREE.SphereGeometry(1.3, segments, segments);
+            break;
+          case "cylinder":
+            // radiusTop, radiusBottom, height, radialSegments, heightSegments
+            geometry = new THREE.CylinderGeometry(1, 1, 2.5, segments, segments);
+            break;
+          default:
+            geometry = new THREE.BoxGeometry(2, 2, 2, segments, segments, segments);
+        }
+
+        mesh = new THREE.Mesh(geometry, material);
+        scene.add(mesh);
+      };
+
+      // Initialize with Cube
+      setShape("cube");
+
+      // --- Interaction Setup ---
+      const controls = new OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.mouseButtons = {
+        LEFT: null, // Disable rotation on left click so we can sculpt
+        MIDDLE: THREE.MOUSE.DOLLY,
+        RIGHT: THREE.MOUSE.ROTATE,
+      };
+
+      const raycaster = new THREE.Raycaster();
+      const mouse = new THREE.Vector2();
+
+      // Cursor helper
+      const cursorGeometry = new THREE.RingGeometry(0.02, 0.05, 32);
+      const cursorMaterial = new THREE.MeshBasicMaterial({ color: 0xff4444, side: THREE.DoubleSide, transparent: true, opacity: 0.6 });
+      const cursor = new THREE.Mesh(cursorGeometry, cursorMaterial);
+      scene.add(cursor);
+      cursor.visible = false;
+
+      // --- State ---
+      let currentTool = "pull";
+      let isMouseDown = false;
+
+      // --- Sculpting Logic ---
+      function sculpt(point, normal) {
+        if (!mesh) return;
+
+        const radius = parseFloat(document.getElementById("radius-slider").value);
+        const intensity = parseFloat(document.getElementById("intensity-slider").value);
+
+        const positions = mesh.geometry.attributes.position;
+        const count = positions.count;
+
+        // Update bounding box for accurate raycasting on modified geometry
+        mesh.geometry.computeBoundingBox();
+
+        const vertex = new THREE.Vector3();
+        const distanceVec = new THREE.Vector3();
+        const localPoint = mesh.worldToLocal(point.clone()); // Convert hit point to local space once
+
+        // Optimization: In a real app, use a spatial index (Octree/BVH).
+        // Here we loop all vertices, which is fine for <100k vertices on modern GPUs.
+        for (let i = 0; i < count; i++) {
+          vertex.fromBufferAttribute(positions, i);
+
+          // Calculate distance in local space (since mesh isn't scaled/rotated, this is safe and faster)
+          const dist = vertex.distanceTo(localPoint);
+
+          if (dist < radius) {
+            // Smooth Cosine Falloff
+            const falloff = 0.5 * (1 + Math.cos((Math.PI * dist) / radius));
+            const force = intensity * falloff * 0.08;
+
+            if (currentTool === "pull") {
+              vertex.addScaledVector(normal, force);
+            } else if (currentTool === "push") {
+              vertex.addScaledVector(normal, -force);
+            } else if (currentTool === "pinch") {
+              distanceVec.subVectors(localPoint, vertex).normalize();
+              vertex.addScaledVector(distanceVec, force * 0.5);
+            }
+
+            positions.setXYZ(i, vertex.x, vertex.y, vertex.z);
+          }
+        }
+
+        positions.needsUpdate = true;
+        mesh.geometry.computeVertexNormals();
+      }
+
+      // --- Event Listeners ---
+
+      window.addEventListener("mousemove", (event) => {
+        mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+        mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+        raycaster.setFromCamera(mouse, camera);
+
+        // Intersect against the current mesh
+        const intersects = raycaster.intersectObject(mesh);
+
+        if (intersects.length > 0) {
+          const hit = intersects[0];
+
+          cursor.visible = true;
+          cursor.position.copy(hit.point);
+          // Orient cursor to surface normal
+          cursor.lookAt(hit.point.clone().add(hit.face.normal));
+
+          // Scale cursor visual
+          const r = parseFloat(document.getElementById("radius-slider").value);
+          cursor.scale.set(r * 10, r * 10, 1);
+
+          if (isMouseDown) {
+            sculpt(hit.point, hit.face.normal);
+          }
+        } else {
+          cursor.visible = false;
+        }
+      });
+
+      window.addEventListener("mousedown", (event) => {
+        if (event.button === 0) {
+          // Left click
+          isMouseDown = true;
+          raycaster.setFromCamera(mouse, camera);
+          const intersects = raycaster.intersectObject(mesh);
+          if (intersects.length > 0) {
+            sculpt(intersects[0].point, intersects[0].face.normal);
+          }
+        }
+      });
+
+      window.addEventListener("mouseup", () => {
+        isMouseDown = false;
+      });
+
+      window.addEventListener("resize", () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+
+      // --- UI Logic ---
+      window.setTool = (toolName) => {
+        currentTool = toolName;
+        // Reset active class on tool buttons only
+        const toolBtns = document.querySelectorAll("button:not(.shape-btn)");
+        toolBtns.forEach((b) => b.classList.remove("active"));
+        document.getElementById(`btn-${toolName}`).classList.add("active");
+      };
+
+      // --- Animation Loop ---
+      function animate() {
+        requestAnimationFrame(animate);
+        controls.update();
+        renderer.render(scene, camera);
+      }
+
+      animate();
+    </script>
+  </body>
+</html>
