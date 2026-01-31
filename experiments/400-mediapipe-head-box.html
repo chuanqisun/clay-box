@@ -162,10 +162,10 @@
             .getUserMedia(constraints)
             .then((stream) => {
               video.srcObject = stream;
-              video.addEventListener("loadeddata", predictWebcam);
+              video.addEventListener("loadeddata", predictWebcam, { once: true });
             })
             .catch((error) => {
-              console.error(error);
+              console.error("Failed to access camera:", error);
               alert("Unable to access the camera. Please allow camera access and try again.");
               webcamRunning = false;
               enableWebcamButton.innerText = "ENABLE WEBCAM";
