@@ -91,7 +91,7 @@
       const enableWebcamButton = document.getElementById("webcamButton");
       const loadingMsg = document.getElementById("loadingMsg");
 
-      let faceDetector = undefined;
+      let faceDetector = null;
       let webcamRunning = false;
       let lastVideoTime = -1;
 
@@ -148,9 +148,11 @@
           webcamRunning = false;
           enableWebcamButton.innerText = "ENABLE WEBCAM";
           const stream = video.srcObject;
-          const tracks = stream.getTracks();
-          tracks.forEach((track) => track.stop());
-          video.srcObject = null;
+          if (stream) {
+            const tracks = stream.getTracks();
+            tracks.forEach((track) => track.stop());
+            video.srcObject = null;
+          }
           canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
         } else {
           webcamRunning = true;
