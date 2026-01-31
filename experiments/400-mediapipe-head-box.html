@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MediaPipe Head Box (BlazeFace Short Range)</title>
+    <title>Head Box Tracking (BlazeFace Short Range)</title>
     <style>
       body {
         margin: 0;
@@ -109,7 +109,7 @@
       };
       createFaceDetector();
 
-      function drawHeadBoxes(detections) {
+      function drawDetectionBoxes(detections) {
         canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
         canvasCtx.lineWidth = 3;
         canvasCtx.strokeStyle = "#00ff84";
@@ -130,7 +130,7 @@
         if (lastVideoTime !== video.currentTime) {
           lastVideoTime = video.currentTime;
           const detections = faceDetector.detectForVideo(video, startTimeMs).detections;
-          drawHeadBoxes(detections);
+          drawDetectionBoxes(detections);
         }
 
         if (webcamRunning) {
@@ -158,10 +158,18 @@
           webcamRunning = true;
           enableWebcamButton.innerText = "DISABLE WEBCAM";
           const constraints = { video: { width: 640, height: 480 } };
-          navigator.mediaDevices.getUserMedia(constraints).then((stream) => {
-            video.srcObject = stream;
-            video.addEventListener("loadeddata", predictWebcam);
-          });
+          navigator.mediaDevices
+            .getUserMedia(constraints)
+            .then((stream) => {
+              video.srcObject = stream;
+              video.addEventListener("loadeddata", predictWebcam);
+            })
+            .catch((error) => {
+              console.error(error);
+              alert("Unable to access the camera. Please allow camera access and try again.");
+              webcamRunning = false;
+              enableWebcamButton.innerText = "ENABLE WEBCAM";
+            });
         }
       }
 
