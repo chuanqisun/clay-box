@@ -178,8 +178,8 @@
   <body>
     <h1>Digital Sculpting - Embodied Experience</h1>
     <p class="description">
-      Sculpt a virtual clay head using your hands! Move your hand to touch your face to start, 
-      then pinch your thumb and index finger together to sculpt. Pull outward to add clay, push inward to remove.
+      Sculpt a virtual clay head using your hands! Pinch your thumb and index finger together 
+      over the clay to sculpt. Move your hand outward to PULL clay, inward to PUSH clay.
     </p>
 
     <div class="container">
@@ -192,7 +192,7 @@
         Left Hand: --<br />
         Right Hand: --
       </div>
-      <div class="sculpt-status" id="sculptStatus">Move hand to face to start</div>
+      <div class="sculpt-status" id="sculptStatus">Pinch over clay to sculpt</div>
     </div>
 
     <div class="controls">
@@ -219,9 +219,9 @@
 
     <div class="instructions">
       <strong>How to sculpt:</strong><br />
-      1. Move your hand close to your face (collision detection)<br />
+      1. Position your hand over the clay (your face outline)<br />
       2. Pinch your thumb and index finger together to start sculpting<br />
-      3. While pinching, move hand outward to PULL clay or inward to PUSH clay<br />
+      3. While pinching, move hand outward (away from camera) to PULL clay or inward to PUSH clay<br />
       4. Release pinch to stop sculpting
     </div>
 
@@ -275,6 +275,9 @@
 
       const renderer = new THREE.WebGLRenderer({ canvas: threeCanvas, alpha: true });
       renderer.setSize(1280, 720);
+
+      // Raycaster for projecting hand position onto clay surface
+      const raycaster = new THREE.Raycaster();
 
       // Add lights
       const ambientLight = new THREE.AmbientLight(0x404040, 2);
@@ -336,8 +339,6 @@
 
       // Pinch detection threshold (normalized distance)
       const PINCH_THRESHOLD = 0.05;
-      // Collision threshold - how close hand needs to be to face center
-      const COLLISION_THRESHOLD = 0.2;
 
       // --- COORDINATE CONVERSION ---
       function convertToThreeJS(landmarks) {
@@ -381,47 +382,42 @@
         return { x: faceCenter.x, y: faceCenter.y, z: faceCenter.z };
       }
 
-      // Check if hand is colliding with face area
-      function checkHandFaceCollision(handLandmarks, faceCenter) {
-        if (!handLandmarks || !faceCenter) return false;
-        
-        // Use index finger tip (landmark 8) for collision detection
-        const indexTip = handLandmarks[8];
-        const dx = indexTip.x - faceCenter.x;
-        const dy = indexTip.y - faceCenter.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        
-        return dist < COLLISION_THRESHOLD;
-      }
-
       // --- SCULPTING LOGIC ---
-      function sculpt(sculptPoint, direction) {
+      function sculpt(point, normal, direction) {
         if (!clayMesh || !clayMesh.visible) return;
 
-        const radius = brushRadiusSlider.value / 100; // Convert to normalized value
-        const intensity = intensitySlider.value / 100;
+        const radius = brushRadiusSlider.value / 100 * 0.3; // Scale to reasonable world units
+        const intensity = intensitySlider.value / 10;
 
         const positions = clayMesh.geometry.attributes.position;
         const count = positions.count;
 
+        // Update bounding box for accurate raycasting on modified geometry
         clayMesh.geometry.computeBoundingBox();
 
         const vertex = new THREE.Vector3();
-        const localPoint = clayMesh.worldToLocal(sculptPoint.clone());
+        const localPoint = clayMesh.worldToLocal(point.clone()); // Convert hit point to local space
+        const localNormal = normal.clone().transformDirection(clayMesh.matrixWorld.clone().invert());
 
         for (let i = 0; i < count; i++) {
           vertex.fromBufferAttribute(positions, i);
 
+          // Calculate distance in local space
           const dist = vertex.distanceTo(localPoint);
 
           if (dist < radius) {
             // Smooth Cosine Falloff
             const falloff = 0.5 * (1 + Math.cos((Math.PI * dist) / radius));
-            const force = intensity * falloff * direction * 0.01;
+            const force = intensity * falloff * 0.02;
 
-            // Get vertex normal for sculpting direction
-            const normal = vertex.clone().normalize();
-            vertex.addScaledVector(normal, force);
+            // Apply force along the surface normal
+            if (direction > 0) {
+              // Pull: add material outward
+              vertex.addScaledVector(localNormal, force);
+            } else {
+              // Push: remove material inward
+              vertex.addScaledVector(localNormal, -force);
+            }
 
             positions.setXYZ(i, vertex.x, vertex.y, vertex.z);
           }
@@ -517,11 +513,7 @@
           clayMesh.visible = false;
         }
 
-        // Reset collision state
-        sculptingState.isColliding = false;
-        let activeHandLandmarks = null;
-
-        // Check left hand
+        // Draw hand landmarks
         if (results.leftHandLandmarks) {
           leftHandDetected = true;
 
@@ -531,15 +523,8 @@
             const color = isPinching ? "#ff4444" : "#ff8a00";
             drawHandLandmarks(canvasCtx, results.leftHandLandmarks, color);
           }
-
-          if (faceCenter && checkHandFaceCollision(results.leftHandLandmarks, faceCenter)) {
-            sculptingState.isColliding = true;
-            sculptingState.activeHand = 'left';
-            activeHandLandmarks = results.leftHandLandmarks;
-          }
         }
 
-        // Check right hand
         if (results.rightHandLandmarks) {
           rightHandDetected = true;
 
@@ -549,60 +534,76 @@
             const color = isPinching ? "#ff4444" : "#00d9e7";
             drawHandLandmarks(canvasCtx, results.rightHandLandmarks, color);
           }
-
-          if (faceCenter && checkHandFaceCollision(results.rightHandLandmarks, faceCenter)) {
-            sculptingState.isColliding = true;
-            sculptingState.activeHand = 'right';
-            activeHandLandmarks = results.rightHandLandmarks;
-          }
         }
 
-        // Handle sculpting logic
-        if (sculptingState.isColliding && activeHandLandmarks) {
-          const pinchDist = getPinchDistance(activeHandLandmarks);
+        // Handle sculpting logic - use raycasting to project hand onto clay
+        let handToProcess = null;
+        if (results.rightHandLandmarks) {
+          handToProcess = results.rightHandLandmarks;
+        } else if (results.leftHandLandmarks) {
+          handToProcess = results.leftHandLandmarks;
+        }
+
+        if (handToProcess && clayMesh.visible) {
+          const pinchDist = getPinchDistance(handToProcess);
           const isPinching = pinchDist < PINCH_THRESHOLD;
 
           if (isPinching) {
-            const pinchPos = getPinchPosition(activeHandLandmarks);
+            const pinchPos = getPinchPosition(handToProcess);
 
-            if (!sculptingState.isPinching) {
-              // Just started pinching
-              sculptingState.isPinching = true;
-              sculptingState.isSculpting = true;
-              sculptingState.pinchStartPos = pinchPos;
-              sculptingState.lastPinchPos = pinchPos;
-            } else {
-              // Continue sculpting - calculate direction based on Z movement
-              const zDelta = sculptingState.lastPinchPos.z - pinchPos.z;
-              const direction = zDelta > 0 ? 1 : -1; // Positive = pull outward, Negative = push inward
+            // Convert pinch position to normalized device coordinates for raycasting
+            const ndcX = pinchPos.x * 2 - 1;
+            const ndcY = -(pinchPos.y * 2 - 1);
 
-              // Convert pinch position to Three.js coordinates for sculpting
-              const sculptPoint = new THREE.Vector3(
-                (pinchPos.x * 2 - 1) * ((frustumSize * aspect) / 2),
-                -(pinchPos.y * 2 - 1) * (frustumSize / 2),
-                -pinchPos.z * 0.5
-              );
+            // Set up raycaster from camera through pinch position
+            raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), threeCamera);
 
-              // Only sculpt if there's significant movement
-              if (Math.abs(zDelta) > 0.001) {
-                sculpt(sculptPoint, direction);
+            // Check for intersection with clay mesh
+            const intersects = raycaster.intersectObject(clayMesh);
+
+            if (intersects.length > 0) {
+              const hit = intersects[0];
+              sculptingState.isColliding = true;
+
+              if (!sculptingState.isPinching) {
+                // Just started pinching on the clay
+                sculptingState.isPinching = true;
+                sculptingState.isSculpting = true;
+                sculptingState.pinchStartPos = pinchPos;
+                sculptingState.lastPinchPos = pinchPos;
+              } else {
+                // Continue sculpting - calculate direction based on Z movement
+                const zDelta = sculptingState.lastPinchPos.z - pinchPos.z;
+                const direction = zDelta > 0 ? 1 : -1; // Positive = pull outward, Negative = push inward
+
+                // Only sculpt if there's significant movement
+                if (Math.abs(zDelta) > 0.002) {
+                  sculpt(hit.point, hit.face.normal, direction);
+                }
+
+                sculptingState.lastPinchPos = pinchPos;
               }
-
-              sculptingState.lastPinchPos = pinchPos;
+            } else {
+              // Ray doesn't hit clay - keep pinching state if already sculpting
+              if (sculptingState.isPinching) {
+                sculptingState.lastPinchPos = pinchPos;
+              }
             }
           } else {
             // Released pinch
             if (sculptingState.isPinching) {
               sculptingState.isPinching = false;
               sculptingState.isSculpting = false;
+              sculptingState.isColliding = false;
               sculptingState.pinchStartPos = null;
               sculptingState.lastPinchPos = null;
             }
           }
         } else {
-          // Not colliding - reset sculpting state
+          // No hand detected - reset sculpting state
           sculptingState.isPinching = false;
           sculptingState.isSculpting = false;
+          sculptingState.isColliding = false;
           sculptingState.pinchStartPos = null;
           sculptingState.lastPinchPos = null;
         }
@@ -621,13 +622,16 @@
 
         // Update sculpt status
         if (sculptingState.isSculpting) {
-          sculptStatus.textContent = "✨ SCULPTING - Move hand to push/pull clay";
+          sculptStatus.textContent = "✨ SCULPTING - Move hand in/out to push/pull clay";
           sculptStatus.style.backgroundColor = "rgba(76, 175, 80, 0.7)";
-        } else if (sculptingState.isColliding) {
-          sculptStatus.textContent = "👆 Pinch to start sculpting";
+        } else if (sculptingState.isPinching) {
+          sculptStatus.textContent = "👆 Pinching - Move over clay to sculpt";
           sculptStatus.style.backgroundColor = "rgba(255, 152, 0, 0.7)";
+        } else if (faceDetected && (leftHandDetected || rightHandDetected)) {
+          sculptStatus.textContent = "✋ Pinch over clay to sculpt";
+          sculptStatus.style.backgroundColor = "rgba(0, 0, 0, 0.5)";
         } else if (faceDetected) {
-          sculptStatus.textContent = "✋ Move hand to face to start";
+          sculptStatus.textContent = "✋ Show your hand to start";
           sculptStatus.style.backgroundColor = "rgba(0, 0, 0, 0.5)";
         } else {
           sculptStatus.textContent = "Looking for face...";
