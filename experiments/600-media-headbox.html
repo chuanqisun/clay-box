@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MediaPipe Holistic + Three.js Head Box</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        background-color: #1e1e1e;
+        font-family: "Segoe UI", sans-serif;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        color: white;
+      }
+
+      h1 {
+        margin: 10px 0;
+        font-size: 1.2rem;
+      }
+
+      .container {
+        position: relative;
+        width: 640px;
+        height: 480px;
+        background: #000;
+        border-radius: 12px;
+        overflow: hidden;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+      }
+
+      video {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        transform: rotateY(180deg);
+        object-fit: cover;
+      }
+
+      canvas {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        transform: rotateY(180deg);
+        pointer-events: none;
+      }
+
+      #three-canvas {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        transform: rotateY(180deg);
+        pointer-events: none;
+      }
+
+      button {
+        margin-top: 15px;
+        padding: 10px 20px;
+        background-color: #007bff;
+        color: white;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+      }
+      button:disabled {
+        background-color: #555;
+      }
+
+      .loading {
+        color: #ffc107;
+        margin-top: 5px;
+        font-size: 0.9rem;
+      }
+
+      .controls {
+        margin-top: 10px;
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        flex-wrap: wrap;
+        justify-content: center;
+      }
+
+      label {
+        font-size: 0.9rem;
+      }
+      input[type="range"] {
+        width: 100px;
+      }
+      .control-group {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+      }
+
+      .fps {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        color: white;
+        font-family: monospace;
+        font-size: 14px;
+        background: rgba(0, 0, 0, 0.5);
+        padding: 5px 10px;
+        border-radius: 4px;
+        z-index: 10;
+      }
+    </style>
+
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/holistic/holistic.js" crossorigin="anonymous"></script>
+
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <h1>Head 3D Box Tracking (Holistic Pose)</h1>
+
+    <div class="container">
+      <video id="webcam" autoplay playsinline></video>
+      <canvas id="output_canvas"></canvas>
+      <canvas id="three-canvas"></canvas>
+      <div class="fps" id="fpsDisplay">FPS: 0</div>
+    </div>
+
+    <div id="loadingMsg" class="loading">Loading MediaPipe Holistic Model...</div>
+    <button id="webcamButton" disabled>ENABLE WEBCAM</button>
+
+    <div class="controls">
+      <label> <input type="checkbox" id="showDebug" checked /> Show Debug Skeleton </label>
+      <div class="control-group">
+        <label>Opacity:</label>
+        <input type="range" id="opacity" min="0" max="100" value="80" />
+        <span id="opacityValue">80%</span>
+      </div>
+      <div class="control-group">
+        <label>Size:</label>
+        <input type="range" id="boxSize" min="10" max="50" value="25" />
+        <span id="sizeValue">0.25</span>
+      </div>
+    </div>
+
+    <script type="module">
+      import * as THREE from "three";
+
+      const video = document.getElementById("webcam");
+      const canvasElement = document.getElementById("output_canvas");
+      const canvasCtx = canvasElement.getContext("2d");
+      const threeCanvas = document.getElementById("three-canvas");
+      const enableWebcamButton = document.getElementById("webcamButton");
+      const loadingMsg = document.getElementById("loadingMsg");
+      const showDebugCheckbox = document.getElementById("showDebug");
+      const opacitySlider = document.getElementById("opacity");
+      const opacityValue = document.getElementById("opacityValue");
+      const boxSizeSlider = document.getElementById("boxSize");
+      const sizeValue = document.getElementById("sizeValue");
+      const fpsDisplay = document.getElementById("fpsDisplay");
+
+      let holistic = null;
+      let camera = null;
+      let webcamRunning = false;
+
+      // Fixed box size (adjustable via slider)
+      let BOX_SIZE = 0.25;
+
+      // FPS calculation
+      let lastTime = performance.now();
+      let fps = 0;
+
+      function updateFPS() {
+        const now = performance.now();
+        fps = Math.round(1000 / (now - lastTime));
+        lastTime = now;
+        fpsDisplay.textContent = `FPS: ${fps}`;
+      }
+
+      // --- THREE.JS SETUP (ORTHOGRAPHIC) ---
+      const scene = new THREE.Scene();
+
+      // Orthographic camera for isometric view
+      const frustumSize = 1;
+      const aspect = 640 / 480;
+      const threeCamera = new THREE.OrthographicCamera(
+        (frustumSize * aspect) / -2,
+        (frustumSize * aspect) / 2,
+        frustumSize / 2,
+        frustumSize / -2,
+        0.01,
+        100
+      );
+      threeCamera.position.set(0, 0, 1);
+      threeCamera.lookAt(0, 0, 0);
+
+      const renderer = new THREE.WebGLRenderer({ canvas: threeCanvas, alpha: true });
+      renderer.setSize(640, 480);
+
+      // Create Head Box Mesh with fixed size
+      const geometry = new THREE.BoxGeometry(1, 1, 1);
+
+      const material = new THREE.MeshPhongMaterial({
+        color: 0x4a90d9,
+        transparent: true,
+        opacity: 0.8,
+        side: THREE.DoubleSide,
+        flatShading: false,
+      });
+
+      const headBoxMesh = new THREE.Mesh(geometry, material);
+      scene.add(headBoxMesh);
+      headBoxMesh.visible = false;
+
+      // Add lights
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+      scene.add(ambientLight);
+
+      const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+      directionalLight.position.set(1, 1, 1);
+      scene.add(directionalLight);
+
+      // --- MEDIAPIPE HOLISTIC SETUP ---
+      const initHolistic = () => {
+        holistic = new Holistic({
+          locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${file}`,
+        });
+
+        holistic.setOptions({
+          modelComplexity: 0,
+          smoothLandmarks: true,
+          enableSegmentation: false,
+          smoothSegmentation: false,
+          minDetectionConfidence: 0.5,
+          minTrackingConfidence: 0.5,
+        });
+
+        holistic.onResults(onResults);
+
+        loadingMsg.style.display = "none";
+        enableWebcamButton.disabled = false;
+      };
+
+      initHolistic();
+
+      // --- COORDINATE CONVERSION ---
+      // Convert normalized screen coordinates to Three.js orthographic space
+      function convertToThreeJS(landmarks) {
+        const points = [];
+
+        for (let i = 0; i < landmarks.length; i++) {
+          const lm = landmarks[i];
+
+          // Convert normalized screen coords to orthographic space
+          const x = (lm.x * 2 - 1) * ((frustumSize * aspect) / 2);
+          const y = -(lm.y * 2 - 1) * (frustumSize / 2);
+          // Use z for depth (negative because camera looks at -z)
+          const z = -lm.z * 0.5;
+
+          points.push(new THREE.Vector3(x, y, z));
+        }
+
+        return points;
+      }
+
+      // --- POSITION AND ORIENT HEAD BOX (FIXED SIZE) ---
+      function positionAndOrientHeadBox(mesh, headPoints) {
+        if (headPoints.length < 11) return;
+
+        // Head landmarks from holistic pose (0-10):
+        // 0: nose
+        // 1: left eye (inner)
+        // 2: left eye
+        // 3: left eye (outer)
+        // 4: right eye (inner)
+        // 5: right eye
+        // 6: right eye (outer)
+        // 7: left ear
+        // 8: right ear
+        // 9: mouth (left)
+        // 10: mouth (right)
+
+        // Calculate center of head (using bounding box center)
+        const bbox = new THREE.Box3().setFromPoints(headPoints);
+        const center = new THREE.Vector3();
+        bbox.getCenter(center);
+
+        // Position mesh at head center
+        mesh.position.copy(center);
+
+        // Set FIXED scale (uniform in all dimensions)
+        mesh.scale.set(BOX_SIZE, BOX_SIZE, BOX_SIZE);
+
+        // Calculate orientation from head landmarks
+        const nose = headPoints[0];
+        const leftEye = headPoints[2];
+        const rightEye = headPoints[5];
+        const leftEar = headPoints[7];
+        const rightEar = headPoints[8];
+
+        // Calculate head basis vectors
+        // Side vector: from right ear to left ear (or right eye to left eye)
+        const side = new THREE.Vector3().subVectors(leftEar, rightEar).normalize();
+
+        // Forward vector: from center of eyes to nose
+        const eyeCenter = new THREE.Vector3().addVectors(leftEye, rightEye).multiplyScalar(0.5);
+        const forward = new THREE.Vector3().subVectors(nose, eyeCenter).normalize();
+
+        // Up vector: cross product of forward and side
+        const up = new THREE.Vector3().crossVectors(forward, side).normalize();
+
+        // Recompute side to ensure orthogonality
+        side.crossVectors(up, forward).normalize();
+
+        // Create rotation matrix
+        const rotMatrix = new THREE.Matrix4();
+        rotMatrix.makeBasis(side, up, forward);
+
+        // Apply rotation
+        mesh.rotation.setFromRotationMatrix(rotMatrix);
+
+        mesh.visible = true;
+      }
+
+      // --- DRAW DEBUG SKELETON FOR HEAD ---
+      function drawHeadSkeleton(landmarks) {
+        if (!landmarks || landmarks.length < 11) return;
+
+        // Draw only head landmarks (0-10)
+        const headLandmarks = landmarks.slice(0, 11);
+
+        // Draw head landmarks as dots
+        canvasCtx.fillStyle = "#00FF00";
+        for (const lm of headLandmarks) {
+          canvasCtx.beginPath();
+          canvasCtx.arc(lm.x * canvasElement.width, lm.y * canvasElement.height, 4, 0, 2 * Math.PI);
+          canvasCtx.fill();
+        }
+
+        // Draw connections between head landmarks
+        const headConnections = [
+          [0, 1], [1, 2], [2, 3], // left eye
+          [0, 4], [4, 5], [5, 6], // right eye
+          [3, 7], // left eye to left ear
+          [6, 8], // right eye to right ear
+          [9, 10], // mouth
+        ];
+
+        canvasCtx.strokeStyle = "#00FF00";
+        canvasCtx.lineWidth = 2;
+        for (const [i, j] of headConnections) {
+          if (headLandmarks[i] && headLandmarks[j]) {
+            canvasCtx.beginPath();
+            canvasCtx.moveTo(headLandmarks[i].x * canvasElement.width, headLandmarks[i].y * canvasElement.height);
+            canvasCtx.lineTo(headLandmarks[j].x * canvasElement.width, headLandmarks[j].y * canvasElement.height);
+            canvasCtx.stroke();
+          }
+        }
+      }
+
+      // --- HOLISTIC RESULTS HANDLER ---
+      function onResults(results) {
+        updateFPS();
+
+        // Clear canvas
+        canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+
+        // Draw video frame
+        canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+        if (results.poseLandmarks && results.poseLandmarks.length > 10) {
+          // Extract head landmarks (0-10)
+          const headLandmarks = results.poseLandmarks.slice(0, 11);
+
+          // Draw Debug Skeleton (optional)
+          if (showDebugCheckbox.checked) {
+            drawHeadSkeleton(results.poseLandmarks);
+          }
+
+          // Convert landmarks to Three.js space
+          const headPoints = convertToThreeJS(headLandmarks);
+
+          // Position and orient head box with FIXED size
+          positionAndOrientHeadBox(headBoxMesh, headPoints);
+        } else {
+          headBoxMesh.visible = false;
+        }
+
+        renderer.render(scene, threeCamera);
+      }
+
+      // --- UI CONTROLS ---
+      opacitySlider.addEventListener("input", (e) => {
+        const value = e.target.value;
+        opacityValue.textContent = value + "%";
+        headBoxMesh.material.opacity = value / 100;
+      });
+
+      boxSizeSlider.addEventListener("input", (e) => {
+        BOX_SIZE = e.target.value / 100;
+        sizeValue.textContent = BOX_SIZE.toFixed(2);
+      });
+
+      // --- WEBCAM BUTTON ---
+      function enableCam(event) {
+        if (!holistic) {
+          alert("Please wait for model to load");
+          return;
+        }
+
+        if (webcamRunning === true) {
+          webcamRunning = false;
+          enableWebcamButton.innerText = "ENABLE WEBCAM";
+          if (camera) {
+            camera.stop();
+            camera = null;
+          }
+          const stream = video.srcObject;
+          if (stream) {
+            const tracks = stream.getTracks();
+            tracks.forEach((track) => track.stop());
+          }
+          video.srcObject = null;
+          canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+          renderer.clear();
+          headBoxMesh.visible = false;
+        } else {
+          webcamRunning = true;
+          enableWebcamButton.innerText = "DISABLE WEBCAM";
+
+          // Initialize camera using MediaPipe Camera utility
+          camera = new Camera(video, {
+            onFrame: async () => {
+              if (webcamRunning) {
+                await holistic.send({ image: video });
+              }
+            },
+            width: 640,
+            height: 480,
+          });
+
+          camera.start();
+
+          // Setup canvas size
+          canvasElement.width = 640;
+          canvasElement.height = 480;
+          renderer.setSize(640, 480);
+
+          // Update orthographic camera aspect
+          const newAspect = 640 / 480;
+          threeCamera.left = (frustumSize * newAspect) / -2;
+          threeCamera.right = (frustumSize * newAspect) / 2;
+          threeCamera.top = frustumSize / 2;
+          threeCamera.bottom = frustumSize / -2;
+          threeCamera.updateProjectionMatrix();
+        }
+      }
+
+      enableWebcamButton.addEventListener("click", enableCam);
+    </script>
+  </body>
+</html>
