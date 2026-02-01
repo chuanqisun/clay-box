@@ -1,0 +1,906 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Digital Sculpting Enhanced - Head Tracking with Both Hands</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        background-color: #1e1e1e;
+        font-family: "Segoe UI", sans-serif;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        color: white;
+      }
+
+      h1 {
+        margin: 10px 0;
+        font-size: 1.2rem;
+      }
+
+      .description {
+        font-size: 0.9rem;
+        color: #aaa;
+        margin-bottom: 10px;
+        text-align: center;
+        max-width: 800px;
+      }
+
+      .container {
+        position: relative;
+        width: 1280px;
+        height: 720px;
+        background: #000;
+        border-radius: 12px;
+        overflow: hidden;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+      }
+
+      .input_video {
+        display: none;
+      }
+
+      .output_canvas {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        transform: scaleX(-1);
+      }
+
+      #three-canvas {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        transform: scaleX(-1);
+        pointer-events: none;
+      }
+
+      .fps {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        color: white;
+        font-family: monospace;
+        font-size: 14px;
+        background: rgba(0, 0, 0, 0.5);
+        padding: 5px 10px;
+        border-radius: 4px;
+        z-index: 10;
+        transform: scaleX(-1);
+      }
+
+      .tracking-status {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        color: white;
+        font-family: monospace;
+        font-size: 12px;
+        background: rgba(0, 0, 0, 0.5);
+        padding: 5px 10px;
+        border-radius: 4px;
+        z-index: 10;
+        transform: scaleX(-1);
+        text-align: right;
+        line-height: 1.6;
+      }
+
+      .sculpt-status {
+        position: absolute;
+        bottom: 10px;
+        left: 10px;
+        color: white;
+        font-family: monospace;
+        font-size: 14px;
+        background: rgba(0, 0, 0, 0.5);
+        padding: 5px 10px;
+        border-radius: 4px;
+        z-index: 10;
+        transform: scaleX(-1);
+      }
+
+      .controls {
+        margin-top: 15px;
+        display: flex;
+        gap: 15px;
+        align-items: center;
+        flex-wrap: wrap;
+        justify-content: center;
+        max-width: 1280px;
+      }
+
+      label {
+        font-size: 0.9rem;
+        cursor: pointer;
+      }
+
+      .control-group {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        background: rgba(255, 255, 255, 0.1);
+        padding: 8px 12px;
+        border-radius: 6px;
+      }
+
+      input[type="checkbox"] {
+        cursor: pointer;
+      }
+
+      input[type="range"] {
+        width: 80px;
+      }
+
+      button {
+        padding: 8px 16px;
+        cursor: pointer;
+        border: 1px solid #555;
+        background: #333;
+        color: white;
+        border-radius: 4px;
+        font-size: 14px;
+        transition: background 0.2s;
+      }
+
+      button:hover {
+        background: #555;
+      }
+
+      .instructions {
+        margin-top: 15px;
+        font-size: 0.85rem;
+        color: #ccc;
+        text-align: center;
+        max-width: 800px;
+        line-height: 1.6;
+      }
+
+      .legend {
+        margin-top: 15px;
+        display: flex;
+        gap: 20px;
+        font-size: 0.85rem;
+      }
+
+      .legend-item {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+      }
+
+      .legend-color {
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+      }
+    </style>
+
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/holistic/holistic.js" crossorigin="anonymous"></script>
+
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <h1>Digital Sculpting Enhanced - Head Tracking with Both Hands</h1>
+    <p class="description">
+      Sculpt a virtual clay head using both hands! The clay follows your head orientation. Pinch your thumb and index finger together over the clay to sculpt.
+      Move your hand outward to PULL clay, inward to PUSH clay.
+    </p>
+
+    <div class="container">
+      <video class="input_video"></video>
+      <canvas class="output_canvas"></canvas>
+      <canvas id="three-canvas"></canvas>
+      <div class="fps" id="fpsDisplay">FPS: 0</div>
+      <div class="tracking-status" id="trackingStatus">
+        Face: --<br />
+        Left Hand: --<br />
+        Right Hand: --
+      </div>
+      <div class="sculpt-status" id="sculptStatus">Pinch over clay to sculpt</div>
+    </div>
+
+    <div class="controls">
+      <div class="control-group">
+        <input type="checkbox" id="showFaceContours" checked />
+        <label for="showFaceContours">Show Face Contours</label>
+      </div>
+      <div class="control-group">
+        <input type="checkbox" id="showHandLandmarks" checked />
+        <label for="showHandLandmarks">Show Hand Landmarks</label>
+      </div>
+      <div class="control-group">
+        <input type="checkbox" id="showSculptZone" checked />
+        <label for="showSculptZone">Show Sculpt Zone</label>
+      </div>
+      <div class="control-group">
+        <label>Brush Radius:</label>
+        <input type="range" id="brushRadius" min="5" max="30" value="15" />
+        <span id="brushRadiusValue">15%</span>
+      </div>
+      <div class="control-group">
+        <label>Intensity:</label>
+        <input type="range" id="intensity" min="1" max="10" value="5" />
+        <span id="intensityValue">5</span>
+      </div>
+      <button id="resetBtn">Reset Clay</button>
+    </div>
+
+    <div class="legend">
+      <div class="legend-item">
+        <div class="legend-color" style="background: #ff8a00"></div>
+        <span>Left Hand</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-color" style="background: #00d9e7"></div>
+        <span>Right Hand</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-color" style="background: #ff4444"></div>
+        <span>Pinching/Sculpting</span>
+      </div>
+    </div>
+
+    <div class="instructions">
+      <strong>How to sculpt:</strong><br />
+      1. Position one or both hands over the clay (your face outline)<br />
+      2. Pinch your thumb and index finger together to start sculpting<br />
+      3. While pinching, move hand outward (away from camera) to PULL clay or inward to PUSH clay<br />
+      4. Release pinch to stop sculpting<br />
+      <strong>New:</strong> The clay follows your head orientation! Use both hands simultaneously for faster sculpting!
+    </div>
+
+    <script type="module">
+      import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
+
+      const videoElement = document.querySelector(".input_video");
+      const canvasElement = document.querySelector(".output_canvas");
+      const canvasCtx = canvasElement.getContext("2d");
+      const threeCanvas = document.getElementById("three-canvas");
+      const fpsDisplay = document.getElementById("fpsDisplay");
+      const trackingStatus = document.getElementById("trackingStatus");
+      const sculptStatus = document.getElementById("sculptStatus");
+
+      // Control elements
+      const showFaceContours = document.getElementById("showFaceContours");
+      const showHandLandmarks = document.getElementById("showHandLandmarks");
+      const showSculptZone = document.getElementById("showSculptZone");
+      const brushRadiusSlider = document.getElementById("brushRadius");
+      const brushRadiusValue = document.getElementById("brushRadiusValue");
+      const intensitySlider = document.getElementById("intensity");
+      const intensityValue = document.getElementById("intensityValue");
+      const resetBtn = document.getElementById("resetBtn");
+
+      // FPS calculation
+      let lastTime = performance.now();
+      let fps = 0;
+
+      function updateFPS() {
+        const now = performance.now();
+        fps = Math.round(1000 / (now - lastTime));
+        lastTime = now;
+        fpsDisplay.textContent = `FPS: ${fps}`;
+      }
+
+      // --- THREE.JS SETUP ---
+      const scene = new THREE.Scene();
+
+      // Orthographic camera for overlay on video
+      const frustumSize = 1;
+      let aspect = 1280 / 720;
+      const threeCamera = new THREE.OrthographicCamera((frustumSize * aspect) / -2, (frustumSize * aspect) / 2, frustumSize / 2, frustumSize / -2, 0.01, 100);
+      threeCamera.position.set(0, 0, 1);
+      threeCamera.lookAt(0, 0, 0);
+
+      const renderer = new THREE.WebGLRenderer({ canvas: threeCanvas, alpha: true });
+      renderer.setSize(1280, 720);
+
+      // Raycaster for projecting hand position onto clay surface
+      const raycaster = new THREE.Raycaster();
+
+      // Add lights
+      const ambientLight = new THREE.AmbientLight(0x404040, 2);
+      scene.add(ambientLight);
+
+      const dirLight = new THREE.DirectionalLight(0xffffff, 2);
+      dirLight.position.set(5, 5, 5);
+      scene.add(dirLight);
+
+      const backLight = new THREE.DirectionalLight(0xffffff, 0.5);
+      backLight.position.set(-5, -5, -5);
+      scene.add(backLight);
+
+      // --- CLAY MESH (Sphere representing the head) ---
+      const CLAY_SEGMENTS = 64;
+      let clayGeometry = new THREE.SphereGeometry(0.15, CLAY_SEGMENTS, CLAY_SEGMENTS);
+      const clayMaterial = new THREE.MeshStandardMaterial({
+        color: 0xaa8866,
+        roughness: 0.6,
+        metalness: 0.1,
+        flatShading: false,
+        transparent: true,
+        opacity: 0.85,
+      });
+      let clayMesh = new THREE.Mesh(clayGeometry, clayMaterial);
+      scene.add(clayMesh);
+      clayMesh.visible = false;
+
+      // --- SCULPT ZONE CURSORS (rings to show sculpting area) ---
+      const cursorGeometry = new THREE.RingGeometry(0.02, 0.05, 32);
+
+      // Left hand cursor (orange)
+      const leftCursorMaterial = new THREE.MeshBasicMaterial({
+        color: 0xff8a00,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.6,
+      });
+      const leftCursor = new THREE.Mesh(cursorGeometry, leftCursorMaterial);
+      scene.add(leftCursor);
+      leftCursor.visible = false;
+
+      // Right hand cursor (cyan)
+      const rightCursorMaterial = new THREE.MeshBasicMaterial({
+        color: 0x00d9e7,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.6,
+      });
+      const rightCursor = new THREE.Mesh(cursorGeometry, rightCursorMaterial);
+      scene.add(rightCursor);
+      rightCursor.visible = false;
+
+      // Store the original vertex positions for reset
+      let originalPositions = null;
+
+      function resetClay() {
+        if (originalPositions && clayMesh.geometry) {
+          const positions = clayMesh.geometry.attributes.position;
+          for (let i = 0; i < positions.count; i++) {
+            positions.setXYZ(i, originalPositions[i * 3], originalPositions[i * 3 + 1], originalPositions[i * 3 + 2]);
+          }
+          positions.needsUpdate = true;
+          clayMesh.geometry.computeVertexNormals();
+        }
+      }
+
+      resetBtn.addEventListener("click", resetClay);
+
+      // --- SCULPTING STATE (per hand) ---
+      const sculptingStateLeft = {
+        isPinching: false,
+        isSculpting: false,
+        lastPinchPos: null,
+        lastHitPoint: null,
+        lastHitNormal: null,
+      };
+
+      const sculptingStateRight = {
+        isPinching: false,
+        isSculpting: false,
+        lastPinchPos: null,
+        lastHitPoint: null,
+        lastHitNormal: null,
+      };
+
+      // Pinch detection threshold (normalized distance) - relaxed for easier pinching
+      const PINCH_THRESHOLD = 0.08;
+      const PINCH_RELEASE_THRESHOLD = 0.12; // Hysteresis to prevent flickering
+
+      // --- COORDINATE CONVERSION ---
+      function convertToThreeJS(landmarks) {
+        const points = [];
+        for (let i = 0; i < landmarks.length; i++) {
+          const lm = landmarks[i];
+          const x = (lm.x * 2 - 1) * ((frustumSize * aspect) / 2);
+          const y = -(lm.y * 2 - 1) * (frustumSize / 2);
+          const z = -lm.z * 0.5;
+          points.push(new THREE.Vector3(x, y, z));
+        }
+        return points;
+      }
+
+      // Get pinch position (midpoint between thumb tip and index tip)
+      function getPinchPosition(handLandmarks) {
+        const thumbTip = handLandmarks[4]; // Thumb tip
+        const indexTip = handLandmarks[8]; // Index finger tip
+        return {
+          x: (thumbTip.x + indexTip.x) / 2,
+          y: (thumbTip.y + indexTip.y) / 2,
+          z: (thumbTip.z + indexTip.z) / 2,
+        };
+      }
+
+      // Get distance between thumb and index finger
+      function getPinchDistance(handLandmarks) {
+        const thumbTip = handLandmarks[4];
+        const indexTip = handLandmarks[8];
+        const dx = thumbTip.x - indexTip.x;
+        const dy = thumbTip.y - indexTip.y;
+        const dz = thumbTip.z - indexTip.z;
+        return Math.sqrt(dx * dx + dy * dy + dz * dz);
+      }
+
+      // --- HEAD ORIENTATION CALCULATION (from 900-refined-hand-head-tracking.html) ---
+      function calculateHeadOrientation(facePoints) {
+        if (facePoints.length < 468) return null;
+
+        // Key face landmarks used for orientation:
+        // 33: left eye outer corner, 263: right eye outer corner (horizontal axis)
+        // 152: chin center, 10: top of forehead (vertical axis)
+        // 1: nose tip (forward reference)
+
+        const leftEyeOuter = facePoints[33];
+        const rightEyeOuter = facePoints[263];
+        const chin = facePoints[152];
+        const forehead = facePoints[10];
+
+        // Calculate face basis vectors
+        // Side vector: from right eye to left eye
+        const side = new THREE.Vector3().subVectors(leftEyeOuter, rightEyeOuter).normalize();
+
+        // Up vector: from chin to forehead
+        const up = new THREE.Vector3().subVectors(forehead, chin).normalize();
+
+        // Forward vector: cross product of side and up
+        const forward = new THREE.Vector3().crossVectors(side, up).normalize();
+
+        // Recompute up to ensure orthogonality
+        up.crossVectors(forward, side).normalize();
+
+        // Create rotation matrix
+        const rotMatrix = new THREE.Matrix4();
+        rotMatrix.makeBasis(side, up, forward);
+
+        return rotMatrix;
+      }
+
+      // --- SCULPTING LOGIC ---
+      function sculpt(point, normal, direction, magnitude = 1.0) {
+        if (!clayMesh || !clayMesh.visible) return;
+
+        const radius = (brushRadiusSlider.value / 100) * 0.3; // Scale to reasonable world units
+        const intensity = intensitySlider.value / 10;
+
+        const positions = clayMesh.geometry.attributes.position;
+        const count = positions.count;
+
+        // Update bounding box for accurate raycasting on modified geometry
+        clayMesh.geometry.computeBoundingBox();
+
+        const vertex = new THREE.Vector3();
+        const localPoint = clayMesh.worldToLocal(point.clone()); // Convert hit point to local space
+        const localNormal = normal.clone().transformDirection(clayMesh.matrixWorld.clone().invert());
+
+        for (let i = 0; i < count; i++) {
+          vertex.fromBufferAttribute(positions, i);
+
+          // Calculate distance in local space
+          const dist = vertex.distanceTo(localPoint);
+
+          if (dist < radius) {
+            // Smooth Cosine Falloff
+            const falloff = 0.5 * (1 + Math.cos((Math.PI * dist) / radius));
+            // Increased force multiplier from 0.02 to 0.08 for more dramatic effects
+            const force = intensity * falloff * 0.08 * magnitude;
+
+            // Apply force along the surface normal
+            if (direction > 0) {
+              // Pull: add material outward
+              vertex.addScaledVector(localNormal, force);
+            } else {
+              // Push: remove material inward
+              vertex.addScaledVector(localNormal, -force);
+            }
+
+            positions.setXYZ(i, vertex.x, vertex.y, vertex.z);
+          }
+        }
+
+        positions.needsUpdate = true;
+        clayMesh.geometry.computeVertexNormals();
+      }
+
+      // Update sculpt zone cursor position and visibility
+      function updateCursor(cursor, cursorMaterial, pinchPos, isPinching, isColliding) {
+        if (!showSculptZone.checked || !isColliding) {
+          cursor.visible = false;
+          return;
+        }
+
+        // Convert pinch position to normalized device coordinates for raycasting
+        const ndcX = pinchPos.x * 2 - 1;
+        const ndcY = -(pinchPos.y * 2 - 1);
+
+        raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), threeCamera);
+        const intersects = raycaster.intersectObject(clayMesh);
+
+        if (intersects.length > 0) {
+          const hit = intersects[0];
+          cursor.visible = true;
+          cursor.position.copy(hit.point);
+          // Offset slightly to prevent z-fighting
+          cursor.position.addScaledVector(hit.face.normal, 0.001);
+          // Orient cursor to surface normal
+          cursor.lookAt(hit.point.clone().add(hit.face.normal));
+
+          // Scale cursor based on brush radius
+          const r = (brushRadiusSlider.value / 100) * 0.3;
+          cursor.scale.set(r * 10, r * 10, 1);
+
+          // Change color when actively sculpting
+          if (isPinching) {
+            cursorMaterial.color.setHex(0xff4444); // Red when sculpting
+            cursorMaterial.opacity = 0.9;
+          } else {
+            cursorMaterial.opacity = 0.6;
+          }
+        } else {
+          cursor.visible = false;
+        }
+      }
+
+      // Process sculpting for a single hand
+      function processHandSculpting(handLandmarks, sculptingState, cursor, cursorMaterial) {
+        if (!handLandmarks || !clayMesh.visible) {
+          // Reset state when hand not detected
+          sculptingState.isPinching = false;
+          sculptingState.isSculpting = false;
+          sculptingState.lastPinchPos = null;
+          sculptingState.lastHitPoint = null;
+          sculptingState.lastHitNormal = null;
+          cursor.visible = false;
+          return { isPinching: false, isSculpting: false };
+        }
+
+        const pinchDist = getPinchDistance(handLandmarks);
+        // Debounced pinch detection with hysteresis
+        const threshold = sculptingState.isPinching ? PINCH_RELEASE_THRESHOLD : PINCH_THRESHOLD;
+        const isPinching = pinchDist < threshold;
+        const pinchPos = getPinchPosition(handLandmarks);
+
+        // Convert pinch position to normalized device coordinates for raycasting
+        const ndcX = pinchPos.x * 2 - 1;
+        const ndcY = -(pinchPos.y * 2 - 1);
+
+        raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), threeCamera);
+        const intersects = raycaster.intersectObject(clayMesh);
+        const isColliding = intersects.length > 0;
+
+        // Update cursor (show it when actively sculpting or when hovering over clay)
+        const showCursor = (sculptingState.isSculpting && isPinching) || isColliding;
+        updateCursor(cursor, cursorMaterial, pinchPos, isPinching && sculptingState.isSculpting, showCursor);
+
+        if (isPinching) {
+          if (!sculptingState.isSculpting && isColliding) {
+            // Just started pinching on the clay - initialize sculpting
+            const hit = intersects[0];
+            sculptingState.isPinching = true;
+            sculptingState.isSculpting = true;
+            sculptingState.lastPinchPos = pinchPos;
+            sculptingState.lastHitPoint = hit.point.clone();
+            sculptingState.lastHitNormal = hit.face.normal.clone();
+            return { isPinching: true, isSculpting: true };
+          } else if (sculptingState.isSculpting) {
+            // Continue sculpting - even if not directly intersecting
+            // Calculate direction and magnitude based on Z movement
+            const zDelta = sculptingState.lastPinchPos.z - pinchPos.z;
+            const direction = zDelta > 0 ? 1 : -1;
+            const magnitude = Math.abs(zDelta) * 100; // Amplify movement
+
+            // Determine the sculpting point and normal
+            let sculptPoint, sculptNormal;
+
+            if (isColliding) {
+              // Hand is over clay - use actual intersection
+              const hit = intersects[0];
+              sculptPoint = hit.point;
+              sculptNormal = hit.face.normal;
+              // Update last known hit point
+              sculptingState.lastHitPoint = hit.point.clone();
+              sculptingState.lastHitNormal = hit.face.normal.clone();
+            } else {
+              // Hand has lifted off but pinch is maintained
+              // Convert current hand position to 3D world space
+              const handPoints = convertToThreeJS([pinchPos]);
+              const currentHandPos = handPoints[0];
+
+              // Use the last hit point as the sculpting center
+              sculptPoint = sculptingState.lastHitPoint;
+              sculptNormal = sculptingState.lastHitNormal;
+
+              // Calculate distance from last hit to current hand position
+              const distance = currentHandPos.distanceTo(sculptPoint);
+              // Use increased magnitude based on how far the hand has moved
+              const pullMagnitude = Math.max(1.0, distance * 5.0);
+
+              // Only sculpt if there's significant movement
+              if (Math.abs(zDelta) > 0.001 && sculptPoint && sculptNormal) {
+                sculpt(sculptPoint, sculptNormal, direction, pullMagnitude);
+              }
+
+              sculptingState.lastPinchPos = pinchPos;
+              return { isPinching: true, isSculpting: true };
+            }
+
+            // Sculpt with amplified magnitude
+            if (Math.abs(zDelta) > 0.001 && sculptPoint && sculptNormal) {
+              sculpt(sculptPoint, sculptNormal, direction, Math.max(1.0, magnitude));
+            }
+
+            sculptingState.lastPinchPos = pinchPos;
+            return { isPinching: true, isSculpting: true };
+          } else {
+            // Pinching but not over clay and haven't started sculpting yet
+            sculptingState.lastPinchPos = pinchPos;
+            return { isPinching: true, isSculpting: false };
+          }
+        } else {
+          // Released pinch - reset everything
+          sculptingState.isPinching = false;
+          sculptingState.isSculpting = false;
+          sculptingState.lastPinchPos = null;
+          sculptingState.lastHitPoint = null;
+          sculptingState.lastHitNormal = null;
+          return { isPinching: false, isSculpting: false };
+        }
+      }
+
+      // --- DRAWING FUNCTIONS ---
+      function drawHandLandmarks(ctx, landmarks, color) {
+        if (!landmarks) return;
+
+        drawConnectors(ctx, landmarks, HAND_CONNECTIONS, {
+          color: color,
+          lineWidth: 2,
+        });
+
+        drawLandmarks(ctx, landmarks, {
+          color: color,
+          fillColor: color,
+          lineWidth: 1,
+          radius: 3,
+        });
+      }
+
+      function drawFaceLandmarks(ctx, landmarks) {
+        if (!landmarks) return;
+
+        drawConnectors(ctx, landmarks, FACEMESH_RIGHT_EYE, { color: "#4a90d9", lineWidth: 1 });
+        drawConnectors(ctx, landmarks, FACEMESH_RIGHT_EYEBROW, { color: "#4a90d9", lineWidth: 1 });
+        drawConnectors(ctx, landmarks, FACEMESH_LEFT_EYE, { color: "#4a90d9", lineWidth: 1 });
+        drawConnectors(ctx, landmarks, FACEMESH_LEFT_EYEBROW, { color: "#4a90d9", lineWidth: 1 });
+        drawConnectors(ctx, landmarks, FACEMESH_FACE_OVAL, { color: "#4a90d9", lineWidth: 2 });
+        drawConnectors(ctx, landmarks, FACEMESH_LIPS, { color: "#E06666", lineWidth: 2 });
+      }
+
+      // --- MAIN RESULTS HANDLER ---
+      function onResults(results) {
+        updateFPS();
+
+        const canvasWidth = canvasElement.width;
+        const canvasHeight = canvasElement.height;
+
+        canvasCtx.save();
+        canvasCtx.clearRect(0, 0, canvasWidth, canvasHeight);
+        canvasCtx.drawImage(results.image, 0, 0, canvasWidth, canvasHeight);
+
+        let faceDetected = false;
+        let leftHandDetected = false;
+        let rightHandDetected = false;
+
+        // Process face
+        if (results.faceLandmarks) {
+          faceDetected = true;
+
+          if (showFaceContours.checked) {
+            drawFaceLandmarks(canvasCtx, results.faceLandmarks);
+          }
+
+          // Convert face landmarks to Three.js coordinates
+          const facePoints = convertToThreeJS(results.faceLandmarks);
+
+          // Calculate face bounding box for clay size and position
+          const bbox = new THREE.Box3().setFromPoints(facePoints);
+          const center = new THREE.Vector3();
+          bbox.getCenter(center);
+
+          const size = new THREE.Vector3();
+          bbox.getSize(size);
+          const faceSize = Math.max(size.x, size.y) * 0.8;
+
+          // Position clay mesh at face center
+          clayMesh.position.copy(center);
+
+          // Scale clay mesh to match face size
+          clayMesh.scale.setScalar(faceSize / 0.15);
+
+          // Apply head orientation to the clay mesh
+          const rotMatrix = calculateHeadOrientation(facePoints);
+          if (rotMatrix) {
+            clayMesh.rotation.setFromRotationMatrix(rotMatrix);
+          }
+
+          if (!originalPositions) {
+            // Store original positions on first frame
+            const positions = clayMesh.geometry.attributes.position;
+            originalPositions = new Float32Array(positions.count * 3);
+            for (let i = 0; i < positions.count; i++) {
+              originalPositions[i * 3] = positions.getX(i);
+              originalPositions[i * 3 + 1] = positions.getY(i);
+              originalPositions[i * 3 + 2] = positions.getZ(i);
+            }
+          }
+
+          clayMesh.visible = true;
+        } else {
+          clayMesh.visible = false;
+          leftCursor.visible = false;
+          rightCursor.visible = false;
+        }
+
+        // Draw and process left hand
+        let leftStatus = { isPinching: false, isSculpting: false };
+        if (results.leftHandLandmarks) {
+          leftHandDetected = true;
+
+          if (showHandLandmarks.checked) {
+            const pinchDist = getPinchDistance(results.leftHandLandmarks);
+            const isPinching = pinchDist < PINCH_THRESHOLD;
+            const color = isPinching ? "#ff4444" : "#ff8a00";
+            drawHandLandmarks(canvasCtx, results.leftHandLandmarks, color);
+          }
+
+          // Reset cursor color to original
+          leftCursorMaterial.color.setHex(0xff8a00);
+          leftStatus = processHandSculpting(results.leftHandLandmarks, sculptingStateLeft, leftCursor, leftCursorMaterial);
+        } else {
+          sculptingStateLeft.isPinching = false;
+          sculptingStateLeft.isSculpting = false;
+          sculptingStateLeft.lastPinchPos = null;
+          sculptingStateLeft.lastHitPoint = null;
+          sculptingStateLeft.lastHitNormal = null;
+          leftCursor.visible = false;
+        }
+
+        // Draw and process right hand
+        let rightStatus = { isPinching: false, isSculpting: false };
+        if (results.rightHandLandmarks) {
+          rightHandDetected = true;
+
+          if (showHandLandmarks.checked) {
+            const pinchDist = getPinchDistance(results.rightHandLandmarks);
+            const isPinching = pinchDist < PINCH_THRESHOLD;
+            const color = isPinching ? "#ff4444" : "#00d9e7";
+            drawHandLandmarks(canvasCtx, results.rightHandLandmarks, color);
+          }
+
+          // Reset cursor color to original
+          rightCursorMaterial.color.setHex(0x00d9e7);
+          rightStatus = processHandSculpting(results.rightHandLandmarks, sculptingStateRight, rightCursor, rightCursorMaterial);
+        } else {
+          sculptingStateRight.isPinching = false;
+          sculptingStateRight.isSculpting = false;
+          sculptingStateRight.lastPinchPos = null;
+          sculptingStateRight.lastHitPoint = null;
+          sculptingStateRight.lastHitNormal = null;
+          rightCursor.visible = false;
+        }
+
+        canvasCtx.restore();
+
+        // Render Three.js scene
+        renderer.render(scene, threeCamera);
+
+        // Update tracking status
+        trackingStatus.innerHTML = `
+          Face: ${faceDetected ? "✓ Tracking" : "-- Not detected"}<br />
+          Left Hand: ${leftHandDetected ? "✓ Tracking" : "-- Not detected"}<br />
+          Right Hand: ${rightHandDetected ? "✓ Tracking" : "-- Not detected"}
+        `;
+
+        // Update sculpt status
+        const bothSculpting = leftStatus.isSculpting && rightStatus.isSculpting;
+        const anySculpting = leftStatus.isSculpting || rightStatus.isSculpting;
+        const anyPinching = leftStatus.isPinching || rightStatus.isPinching;
+
+        if (bothSculpting) {
+          sculptStatus.textContent = "✨ BOTH HANDS SCULPTING!";
+          sculptStatus.style.backgroundColor = "rgba(156, 39, 176, 0.7)"; // Purple for both
+        } else if (leftStatus.isSculpting) {
+          sculptStatus.textContent = "✨ LEFT HAND SCULPTING";
+          sculptStatus.style.backgroundColor = "rgba(255, 138, 0, 0.7)"; // Orange
+        } else if (rightStatus.isSculpting) {
+          sculptStatus.textContent = "✨ RIGHT HAND SCULPTING";
+          sculptStatus.style.backgroundColor = "rgba(0, 217, 231, 0.7)"; // Cyan
+        } else if (anyPinching) {
+          sculptStatus.textContent = "👆 Pinching - Move over clay to sculpt";
+          sculptStatus.style.backgroundColor = "rgba(255, 152, 0, 0.7)";
+        } else if (faceDetected && (leftHandDetected || rightHandDetected)) {
+          sculptStatus.textContent = "✋ Pinch over clay to sculpt";
+          sculptStatus.style.backgroundColor = "rgba(0, 0, 0, 0.5)";
+        } else if (faceDetected) {
+          sculptStatus.textContent = "✋ Show your hands to start";
+          sculptStatus.style.backgroundColor = "rgba(0, 0, 0, 0.5)";
+        } else {
+          sculptStatus.textContent = "Looking for face...";
+          sculptStatus.style.backgroundColor = "rgba(0, 0, 0, 0.5)";
+        }
+      }
+
+      // --- UI CONTROLS ---
+      brushRadiusSlider.addEventListener("input", (e) => {
+        brushRadiusValue.textContent = e.target.value + "%";
+      });
+
+      intensitySlider.addEventListener("input", (e) => {
+        intensityValue.textContent = e.target.value;
+      });
+
+      // Initialize MediaPipe Holistic
+      const holistic = new Holistic({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${file}`,
+      });
+
+      holistic.setOptions({
+        modelComplexity: 1,
+        smoothLandmarks: true,
+        enableSegmentation: false,
+        smoothSegmentation: false,
+        refineFaceLandmarks: true,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5,
+      });
+
+      holistic.onResults(onResults);
+
+      // Initialize camera
+      const camera = new Camera(videoElement, {
+        onFrame: async () => {
+          await holistic.send({ image: videoElement });
+        },
+        width: 1280,
+        height: 720,
+      });
+
+      camera.start();
+
+      // Resize canvas to match video dimensions
+      function resizeCanvas() {
+        const videoWidth = videoElement.videoWidth || 1280;
+        const videoHeight = videoElement.videoHeight || 720;
+
+        canvasElement.width = videoWidth;
+        canvasElement.height = videoHeight;
+        renderer.setSize(videoWidth, videoHeight);
+
+        aspect = videoWidth / videoHeight;
+        threeCamera.left = (frustumSize * aspect) / -2;
+        threeCamera.right = (frustumSize * aspect) / 2;
+        threeCamera.top = frustumSize / 2;
+        threeCamera.bottom = frustumSize / -2;
+        threeCamera.updateProjectionMatrix();
+      }
+
+      videoElement.addEventListener("loadedmetadata", resizeCanvas);
+      window.addEventListener("resize", resizeCanvas);
+
+      canvasElement.width = 1280;
+      canvasElement.height = 720;
+    </script>
+  </body>
+</html>
