@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MediaPipe Holistic - Refined Hand and Face Tracking with 3D Boxes</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        background-color: #1e1e1e;
+        font-family: "Segoe UI", sans-serif;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        color: white;
+      }
+
+      h1 {
+        margin: 10px 0;
+        font-size: 1.2rem;
+      }
+
+      .description {
+        font-size: 0.9rem;
+        color: #aaa;
+        margin-bottom: 10px;
+        text-align: center;
+        max-width: 800px;
+      }
+
+      .container {
+        position: relative;
+        width: 1280px;
+        height: 720px;
+        background: #000;
+        border-radius: 12px;
+        overflow: hidden;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+      }
+
+      .input_video {
+        display: none;
+      }
+
+      .output_canvas {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        transform: scaleX(-1);
+      }
+
+      #three-canvas {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        transform: scaleX(-1);
+        pointer-events: none;
+      }
+
+      .fps {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        color: white;
+        font-family: monospace;
+        font-size: 14px;
+        background: rgba(0, 0, 0, 0.5);
+        padding: 5px 10px;
+        border-radius: 4px;
+        z-index: 10;
+        transform: scaleX(-1);
+      }
+
+      .tracking-status {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        color: white;
+        font-family: monospace;
+        font-size: 12px;
+        background: rgba(0, 0, 0, 0.5);
+        padding: 5px 10px;
+        border-radius: 4px;
+        z-index: 10;
+        transform: scaleX(-1);
+        text-align: right;
+        line-height: 1.6;
+      }
+
+      .collision-status {
+        position: absolute;
+        bottom: 10px;
+        left: 10px;
+        color: white;
+        font-family: monospace;
+        font-size: 14px;
+        background: rgba(0, 0, 0, 0.5);
+        padding: 5px 10px;
+        border-radius: 4px;
+        z-index: 10;
+        transform: scaleX(-1);
+      }
+
+      .controls {
+        margin-top: 15px;
+        display: flex;
+        gap: 15px;
+        align-items: center;
+        flex-wrap: wrap;
+        justify-content: center;
+        max-width: 1280px;
+      }
+
+      label {
+        font-size: 0.9rem;
+        cursor: pointer;
+      }
+
+      .control-group {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        background: rgba(255, 255, 255, 0.1);
+        padding: 8px 12px;
+        border-radius: 6px;
+      }
+
+      input[type="checkbox"] {
+        cursor: pointer;
+      }
+
+      input[type="range"] {
+        width: 80px;
+      }
+
+      .legend {
+        margin-top: 15px;
+        display: flex;
+        gap: 20px;
+        font-size: 0.85rem;
+      }
+
+      .legend-item {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+      }
+
+      .legend-color {
+        width: 20px;
+        height: 20px;
+        border-radius: 4px;
+        border: 2px solid;
+      }
+    </style>
+
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/holistic/holistic.js" crossorigin="anonymous"></script>
+
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <h1>Refined Hand and Face Tracking with 3D Bounding Boxes</h1>
+    <p class="description">
+      This demo uses MediaPipe Holistic with the recrop technique for precise hand and face tracking. The holistic pipeline first estimates pose, then uses
+      re-crop models to refine ROIs for hands and face before running detailed landmark models (21 hand landmarks per hand, 468 face landmarks). 3D bounding
+      boxes are rendered using Three.js with proper orientation from key landmarks.
+    </p>
+
+    <div class="container">
+      <video class="input_video"></video>
+      <canvas class="output_canvas"></canvas>
+      <canvas id="three-canvas"></canvas>
+      <div class="fps" id="fpsDisplay">FPS: 0</div>
+      <div class="tracking-status" id="trackingStatus">
+        Face: --<br />
+        Left Hand: --<br />
+        Right Hand: --
+      </div>
+      <div class="collision-status" id="collisionStatus">No collision</div>
+    </div>
+
+    <div class="controls">
+      <div class="control-group">
+        <input type="checkbox" id="showFaceMesh" />
+        <label for="showFaceMesh">Show Face Mesh</label>
+      </div>
+      <div class="control-group">
+        <input type="checkbox" id="showFaceContours" checked />
+        <label for="showFaceContours">Show Face Contours</label>
+      </div>
+      <div class="control-group">
+        <input type="checkbox" id="showFaceBox" checked />
+        <label for="showFaceBox">Show Face 3D Box</label>
+      </div>
+      <div class="control-group">
+        <input type="checkbox" id="showHandLandmarks" checked />
+        <label for="showHandLandmarks">Show Hand Landmarks</label>
+      </div>
+      <div class="control-group">
+        <input type="checkbox" id="showHandBoxes" checked />
+        <label for="showHandBoxes">Show Hand 3D Boxes</label>
+      </div>
+      <div class="control-group">
+        <input type="checkbox" id="showPose" />
+        <label for="showPose">Show Pose</label>
+      </div>
+      <div class="control-group">
+        <label>Opacity:</label>
+        <input type="range" id="opacity" min="0" max="100" value="70" />
+        <span id="opacityValue">70%</span>
+      </div>
+      <div class="control-group">
+        <label>Hand Size:</label>
+        <input type="range" id="handSize" min="5" max="40" value="15" />
+        <span id="handSizeValue">0.15</span>
+      </div>
+      <div class="control-group">
+        <label>Face Size:</label>
+        <input type="range" id="faceSize" min="10" max="50" value="25" />
+        <span id="faceSizeValue">0.25</span>
+      </div>
+    </div>
+
+    <div class="legend">
+      <div class="legend-item">
+        <div class="legend-color" style="background: rgba(74, 144, 217, 0.3); border-color: #4a90d9"></div>
+        <span>Face</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-color" style="background: rgba(255, 138, 0, 0.3); border-color: #ff8a00"></div>
+        <span>Left Hand</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-color" style="background: rgba(0, 217, 231, 0.3); border-color: #00d9e7"></div>
+        <span>Right Hand</span>
+      </div>
+    </div>
+
+    <script type="module">
+      import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
+
+      const videoElement = document.querySelector(".input_video");
+      const canvasElement = document.querySelector(".output_canvas");
+      const canvasCtx = canvasElement.getContext("2d");
+      const threeCanvas = document.getElementById("three-canvas");
+      const fpsDisplay = document.getElementById("fpsDisplay");
+      const trackingStatus = document.getElementById("trackingStatus");
+      const collisionStatus = document.getElementById("collisionStatus");
+
+      // Control checkboxes
+      const showFaceMesh = document.getElementById("showFaceMesh");
+      const showFaceContours = document.getElementById("showFaceContours");
+      const showFaceBox = document.getElementById("showFaceBox");
+      const showHandLandmarks = document.getElementById("showHandLandmarks");
+      const showHandBoxes = document.getElementById("showHandBoxes");
+      const showPose = document.getElementById("showPose");
+
+      // Sliders
+      const opacitySlider = document.getElementById("opacity");
+      const opacityValue = document.getElementById("opacityValue");
+      const handSizeSlider = document.getElementById("handSize");
+      const handSizeValue = document.getElementById("handSizeValue");
+      const faceSizeSlider = document.getElementById("faceSize");
+      const faceSizeValue = document.getElementById("faceSizeValue");
+
+      // 3D Box sizes (adjustable via sliders)
+      let HAND_BOX_SIZE = 0.15;
+      let FACE_BOX_SIZE = 0.25;
+
+      // Colors
+      const FACE_COLOR = 0x4a90d9; // Blue
+      const LEFT_HAND_COLOR = 0xff8a00; // Orange
+      const RIGHT_HAND_COLOR = 0x00d9e7; // Cyan
+      const HAND_COLOR_COLLISION = 0xff0000; // Red
+      const POSE_COLOR = "#ffffff";
+
+      // FPS calculation
+      let lastTime = performance.now();
+      let fps = 0;
+
+      function updateFPS() {
+        const now = performance.now();
+        fps = Math.round(1000 / (now - lastTime));
+        lastTime = now;
+        fpsDisplay.textContent = `FPS: ${fps}`;
+      }
+
+      // --- THREE.JS SETUP (ORTHOGRAPHIC) ---
+      const scene = new THREE.Scene();
+
+      // Orthographic camera for overlay on video
+      // Initial dimensions - will be updated in resizeCanvas()
+      const frustumSize = 1;
+      let aspect = 1280 / 720;
+      const threeCamera = new THREE.OrthographicCamera((frustumSize * aspect) / -2, (frustumSize * aspect) / 2, frustumSize / 2, frustumSize / -2, 0.01, 100);
+      threeCamera.position.set(0, 0, 1);
+      threeCamera.lookAt(0, 0, 0);
+
+      const renderer = new THREE.WebGLRenderer({ canvas: threeCanvas, alpha: true });
+      // Initial size - will be updated in resizeCanvas() when video loads
+      renderer.setSize(1280, 720);
+
+      // Create Face Box Mesh
+      const faceGeometry = new THREE.BoxGeometry(1, 1, 1);
+      const faceMaterial = new THREE.MeshPhongMaterial({
+        color: FACE_COLOR,
+        transparent: true,
+        opacity: 0.7,
+        side: THREE.DoubleSide,
+        flatShading: false,
+      });
+      const faceBoxMesh = new THREE.Mesh(faceGeometry, faceMaterial);
+      scene.add(faceBoxMesh);
+      faceBoxMesh.visible = false;
+
+      // Create Hand Box Meshes (for left and right hands)
+      const handGeometry = new THREE.BoxGeometry(1, 1, 1);
+
+      const leftHandMaterial = new THREE.MeshPhongMaterial({
+        color: LEFT_HAND_COLOR,
+        transparent: true,
+        opacity: 0.7,
+        side: THREE.DoubleSide,
+        flatShading: false,
+      });
+      const leftHandBoxMesh = new THREE.Mesh(handGeometry, leftHandMaterial);
+      scene.add(leftHandBoxMesh);
+      leftHandBoxMesh.visible = false;
+
+      const rightHandMaterial = new THREE.MeshPhongMaterial({
+        color: RIGHT_HAND_COLOR,
+        transparent: true,
+        opacity: 0.7,
+        side: THREE.DoubleSide,
+        flatShading: false,
+      });
+      const rightHandBoxMesh = new THREE.Mesh(handGeometry, rightHandMaterial);
+      scene.add(rightHandBoxMesh);
+      rightHandBoxMesh.visible = false;
+
+      // Add lights
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+      scene.add(ambientLight);
+
+      const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+      directionalLight.position.set(1, 1, 1);
+      scene.add(directionalLight);
+
+      // --- COORDINATE CONVERSION ---
+      // Convert normalized screen coordinates to Three.js orthographic space
+      function convertToThreeJS(landmarks) {
+        const points = [];
+
+        for (let i = 0; i < landmarks.length; i++) {
+          const lm = landmarks[i];
+
+          // Convert normalized screen coords to orthographic space
+          const x = (lm.x * 2 - 1) * ((frustumSize * aspect) / 2);
+          const y = -(lm.y * 2 - 1) * (frustumSize / 2);
+          // Use z for depth (negative because camera looks at -z)
+          const z = -lm.z * 0.5;
+
+          points.push(new THREE.Vector3(x, y, z));
+        }
+
+        return points;
+      }
+
+      // --- POSITION AND ORIENT FACE BOX (using 468 face landmarks) ---
+      function positionAndOrientFaceBox(mesh, facePoints) {
+        if (facePoints.length < 468) return;
+
+        // Key face landmarks used for orientation:
+        // 33: left eye outer corner, 263: right eye outer corner (horizontal axis)
+        // 152: chin center, 10: top of forehead (vertical axis)
+        // 1: nose tip (forward reference)
+
+        // Calculate center of face using bounding box
+        const bbox = new THREE.Box3().setFromPoints(facePoints);
+        const center = new THREE.Vector3();
+        bbox.getCenter(center);
+
+        // Position mesh at face center
+        mesh.position.copy(center);
+
+        // Set scale based on slider
+        mesh.scale.set(FACE_BOX_SIZE, FACE_BOX_SIZE, FACE_BOX_SIZE);
+
+        // Calculate orientation from key face landmarks
+        // Use outer eye corners for horizontal axis
+        const leftEyeOuter = facePoints[33]; // Left eye outer corner
+        const rightEyeOuter = facePoints[263]; // Right eye outer corner
+
+        // Use chin and forehead for vertical axis
+        const chin = facePoints[152]; // Chin center
+        const forehead = facePoints[10]; // Top of forehead
+
+        // Nose tip for forward direction
+        const noseTip = facePoints[1]; // Nose tip
+
+        // Calculate face basis vectors
+        // Side vector: from right eye to left eye
+        const side = new THREE.Vector3().subVectors(leftEyeOuter, rightEyeOuter).normalize();
+
+        // Up vector: from chin to forehead
+        const up = new THREE.Vector3().subVectors(forehead, chin).normalize();
+
+        // Forward vector: cross product of side and up
+        const forward = new THREE.Vector3().crossVectors(side, up).normalize();
+
+        // Recompute up to ensure orthogonality
+        up.crossVectors(forward, side).normalize();
+
+        // Create rotation matrix
+        const rotMatrix = new THREE.Matrix4();
+        rotMatrix.makeBasis(side, up, forward);
+
+        // Apply rotation
+        mesh.rotation.setFromRotationMatrix(rotMatrix);
+
+        mesh.visible = true;
+      }
+
+      // --- POSITION AND ORIENT HAND BOX (using 21 hand landmarks) ---
+      function positionAndOrientHandBox(mesh, handPoints) {
+        if (handPoints.length < 21) return;
+
+        // Calculate center of hand using bounding box
+        const bbox = new THREE.Box3().setFromPoints(handPoints);
+        const center = new THREE.Vector3();
+        bbox.getCenter(center);
+
+        // Position mesh at hand center
+        mesh.position.copy(center);
+
+        // Set scale based on slider
+        mesh.scale.set(HAND_BOX_SIZE, HAND_BOX_SIZE, HAND_BOX_SIZE);
+
+        // Hand landmarks:
+        // 0: wrist
+        // 5: index finger MCP (base)
+        // 9: middle finger MCP
+        // 17: pinky MCP
+        // Calculate orientation from hand landmarks
+        const wrist = handPoints[0];
+        const indexMCP = handPoints[5];
+        const middleMCP = handPoints[9];
+        const pinkyMCP = handPoints[17];
+
+        // Calculate hand basis vectors
+        // Forward: from wrist to middle finger base
+        const forward = new THREE.Vector3().subVectors(middleMCP, wrist).normalize();
+
+        // Side: from index MCP to pinky MCP
+        const side = new THREE.Vector3().subVectors(pinkyMCP, indexMCP).normalize();
+
+        // Up: cross product of forward and side (palm normal)
+        const up = new THREE.Vector3().crossVectors(forward, side).normalize();
+
+        // Recompute side to ensure orthogonality
+        side.crossVectors(up, forward).normalize();
+
+        // Create rotation matrix
+        const rotMatrix = new THREE.Matrix4();
+        rotMatrix.makeBasis(side, up, forward);
+
+        // Apply rotation
+        mesh.rotation.setFromRotationMatrix(rotMatrix);
+
+        mesh.visible = true;
+      }
+
+      // --- COLLISION DETECTION ---
+      function checkCollision(handMesh, faceMesh) {
+        if (!handMesh.visible || !faceMesh.visible) return false;
+
+        // Create bounding boxes for both meshes
+        const handBox = new THREE.Box3().setFromObject(handMesh);
+        const faceBox = new THREE.Box3().setFromObject(faceMesh);
+
+        // Check if bounding boxes intersect
+        return handBox.intersectsBox(faceBox);
+      }
+
+      /**
+       * Draw hand landmarks with connections
+       */
+      function drawHandLandmarks(ctx, landmarks, color) {
+        if (!landmarks) return;
+
+        // Draw connections
+        drawConnectors(ctx, landmarks, HAND_CONNECTIONS, {
+          color: color,
+          lineWidth: 2,
+        });
+
+        // Draw landmarks
+        drawLandmarks(ctx, landmarks, {
+          color: color,
+          fillColor: color,
+          lineWidth: 1,
+          radius: 3,
+        });
+      }
+
+      /**
+       * Draw face landmarks with various connection styles
+       */
+      function drawFaceLandmarks(ctx, landmarks, showMesh, showContours) {
+        if (!landmarks) return;
+
+        if (showMesh) {
+          // Draw full face mesh tesselation
+          drawConnectors(ctx, landmarks, FACEMESH_TESSELATION, {
+            color: "#C0C0C030",
+            lineWidth: 1,
+          });
+        }
+
+        if (showContours) {
+          // Draw face contours (eyes, eyebrows, lips, face oval)
+          drawConnectors(ctx, landmarks, FACEMESH_RIGHT_EYE, { color: "#4a90d9", lineWidth: 1 });
+          drawConnectors(ctx, landmarks, FACEMESH_RIGHT_EYEBROW, { color: "#4a90d9", lineWidth: 1 });
+          drawConnectors(ctx, landmarks, FACEMESH_LEFT_EYE, { color: "#4a90d9", lineWidth: 1 });
+          drawConnectors(ctx, landmarks, FACEMESH_LEFT_EYEBROW, { color: "#4a90d9", lineWidth: 1 });
+          drawConnectors(ctx, landmarks, FACEMESH_FACE_OVAL, { color: "#4a90d9", lineWidth: 2 });
+          drawConnectors(ctx, landmarks, FACEMESH_LIPS, { color: "#E06666", lineWidth: 2 });
+
+          // Draw iris if available (refineFaceLandmarks enables this)
+          if (landmarks.length > 468) {
+            drawConnectors(ctx, landmarks, FACEMESH_RIGHT_IRIS, { color: "#00FF00", lineWidth: 1 });
+            drawConnectors(ctx, landmarks, FACEMESH_LEFT_IRIS, { color: "#00FF00", lineWidth: 1 });
+          }
+        }
+      }
+
+      /**
+       * Draw pose landmarks
+       */
+      function drawPoseLandmarks(ctx, landmarks) {
+        if (!landmarks) return;
+
+        drawConnectors(ctx, landmarks, POSE_CONNECTIONS, {
+          color: POSE_COLOR,
+          lineWidth: 2,
+        });
+        drawLandmarks(ctx, landmarks, {
+          color: POSE_COLOR,
+          fillColor: "rgb(0, 217, 231)",
+          lineWidth: 1,
+          radius: 4,
+        });
+      }
+
+      /**
+       * Main results handler - called when Holistic processing completes
+       */
+      function onResults(results) {
+        updateFPS();
+
+        const canvasWidth = canvasElement.width;
+        const canvasHeight = canvasElement.height;
+
+        // Clear canvas and draw video frame
+        canvasCtx.save();
+        canvasCtx.clearRect(0, 0, canvasWidth, canvasHeight);
+        canvasCtx.drawImage(results.image, 0, 0, canvasWidth, canvasHeight);
+
+        // Track what's detected
+        let faceDetected = false;
+        let leftHandDetected = false;
+        let rightHandDetected = false;
+        let leftCollision = false;
+        let rightCollision = false;
+
+        // Draw pose if enabled
+        if (showPose.checked && results.poseLandmarks) {
+          drawPoseLandmarks(canvasCtx, results.poseLandmarks);
+        }
+
+        // Process and draw face
+        if (results.faceLandmarks) {
+          faceDetected = true;
+
+          // Draw face landmarks on 2D canvas
+          drawFaceLandmarks(canvasCtx, results.faceLandmarks, showFaceMesh.checked, showFaceContours.checked);
+
+          // Position and orient 3D face box
+          if (showFaceBox.checked) {
+            const facePoints = convertToThreeJS(results.faceLandmarks);
+            positionAndOrientFaceBox(faceBoxMesh, facePoints);
+          } else {
+            faceBoxMesh.visible = false;
+          }
+        } else {
+          faceBoxMesh.visible = false;
+        }
+
+        // Process and draw left hand
+        if (results.leftHandLandmarks) {
+          leftHandDetected = true;
+
+          // Draw hand landmarks on 2D canvas
+          if (showHandLandmarks.checked) {
+            drawHandLandmarks(canvasCtx, results.leftHandLandmarks, "#ff8a00");
+          }
+
+          // Position and orient 3D hand box
+          if (showHandBoxes.checked) {
+            const leftHandPoints = convertToThreeJS(results.leftHandLandmarks);
+            positionAndOrientHandBox(leftHandBoxMesh, leftHandPoints);
+
+            // Check collision with face
+            leftCollision = checkCollision(leftHandBoxMesh, faceBoxMesh);
+            leftHandMaterial.color.setHex(leftCollision ? HAND_COLOR_COLLISION : LEFT_HAND_COLOR);
+          } else {
+            leftHandBoxMesh.visible = false;
+          }
+        } else {
+          leftHandBoxMesh.visible = false;
+        }
+
+        // Process and draw right hand
+        if (results.rightHandLandmarks) {
+          rightHandDetected = true;
+
+          // Draw hand landmarks on 2D canvas
+          if (showHandLandmarks.checked) {
+            drawHandLandmarks(canvasCtx, results.rightHandLandmarks, "#00d9e7");
+          }
+
+          // Position and orient 3D hand box
+          if (showHandBoxes.checked) {
+            const rightHandPoints = convertToThreeJS(results.rightHandLandmarks);
+            positionAndOrientHandBox(rightHandBoxMesh, rightHandPoints);
+
+            // Check collision with face
+            rightCollision = checkCollision(rightHandBoxMesh, faceBoxMesh);
+            rightHandMaterial.color.setHex(rightCollision ? HAND_COLOR_COLLISION : RIGHT_HAND_COLOR);
+          } else {
+            rightHandBoxMesh.visible = false;
+          }
+        } else {
+          rightHandBoxMesh.visible = false;
+        }
+
+        canvasCtx.restore();
+
+        // Render Three.js scene
+        renderer.render(scene, threeCamera);
+
+        // Update tracking status display
+        trackingStatus.innerHTML = `
+          Face: ${faceDetected ? "✓ Tracking" : "-- Not detected"}<br />
+          Left Hand: ${leftHandDetected ? "✓ Tracking" : "-- Not detected"}<br />
+          Right Hand: ${rightHandDetected ? "✓ Tracking" : "-- Not detected"}
+        `;
+
+        // Update collision status display
+        if (leftCollision && rightCollision) {
+          collisionStatus.textContent = "Both hands touching face!";
+          collisionStatus.style.backgroundColor = "rgba(255, 0, 0, 0.7)";
+        } else if (leftCollision) {
+          collisionStatus.textContent = "Left hand touching face!";
+          collisionStatus.style.backgroundColor = "rgba(255, 100, 0, 0.7)";
+        } else if (rightCollision) {
+          collisionStatus.textContent = "Right hand touching face!";
+          collisionStatus.style.backgroundColor = "rgba(255, 100, 0, 0.7)";
+        } else {
+          collisionStatus.textContent = "No collision";
+          collisionStatus.style.backgroundColor = "rgba(0, 0, 0, 0.5)";
+        }
+      }
+
+      // --- UI CONTROLS ---
+      opacitySlider.addEventListener("input", (e) => {
+        const value = e.target.value;
+        opacityValue.textContent = value + "%";
+        faceMaterial.opacity = value / 100;
+        leftHandMaterial.opacity = value / 100;
+        rightHandMaterial.opacity = value / 100;
+      });
+
+      handSizeSlider.addEventListener("input", (e) => {
+        HAND_BOX_SIZE = e.target.value / 100;
+        handSizeValue.textContent = HAND_BOX_SIZE.toFixed(2);
+      });
+
+      faceSizeSlider.addEventListener("input", (e) => {
+        FACE_BOX_SIZE = e.target.value / 100;
+        faceSizeValue.textContent = FACE_BOX_SIZE.toFixed(2);
+      });
+
+      // Initialize MediaPipe Holistic
+      const holistic = new Holistic({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${file}`,
+      });
+
+      // Configure Holistic with recrop technique enabled via refineFaceLandmarks
+      // This enables the attention mesh model for better face landmark accuracy
+      // The holistic pipeline internally uses the recrop technique:
+      // 1. First estimates pose with BlazePose
+      // 2. Derives ROIs for hands and face from pose landmarks
+      // 3. Uses re-crop models to refine ROIs (spatial transformers)
+      // 4. Runs detailed hand/face landmark models on refined crops
+      holistic.setOptions({
+        modelComplexity: 1, // 0, 1, or 2 - higher = more accurate but slower
+        smoothLandmarks: true,
+        enableSegmentation: false,
+        smoothSegmentation: false,
+        refineFaceLandmarks: true, // Enable attention mesh for better eye/lip/iris landmarks
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5,
+      });
+
+      holistic.onResults(onResults);
+
+      // Initialize camera
+      const camera = new Camera(videoElement, {
+        onFrame: async () => {
+          await holistic.send({ image: videoElement });
+        },
+        width: 1280,
+        height: 720,
+      });
+
+      camera.start();
+
+      // Resize canvas to match video dimensions
+      function resizeCanvas() {
+        const videoWidth = videoElement.videoWidth || 1280;
+        const videoHeight = videoElement.videoHeight || 720;
+
+        canvasElement.width = videoWidth;
+        canvasElement.height = videoHeight;
+        renderer.setSize(videoWidth, videoHeight);
+
+        // Update orthographic camera aspect
+        aspect = videoWidth / videoHeight;
+        threeCamera.left = (frustumSize * aspect) / -2;
+        threeCamera.right = (frustumSize * aspect) / 2;
+        threeCamera.top = frustumSize / 2;
+        threeCamera.bottom = frustumSize / -2;
+        threeCamera.updateProjectionMatrix();
+      }
+
+      videoElement.addEventListener("loadedmetadata", resizeCanvas);
+      window.addEventListener("resize", resizeCanvas);
+
+      // Initial canvas size
+      canvasElement.width = 1280;
+      canvasElement.height = 720;
+    </script>
+  </body>
+</html>
