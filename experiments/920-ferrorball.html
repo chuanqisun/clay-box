@@ -1,0 +1,790 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ferrofluid Face - Hand as Magnet</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        background-color: #000;
+        overflow: hidden;
+        font-family: "Segoe UI", sans-serif;
+      }
+
+      #overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.9);
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        z-index: 100;
+        cursor: pointer;
+        transition: opacity 0.5s;
+      }
+
+      #overlay h1 {
+        color: white;
+        font-size: 2rem;
+        margin-bottom: 1rem;
+      }
+
+      #overlay p {
+        color: #aaa;
+        font-size: 1rem;
+        text-align: center;
+        max-width: 500px;
+        line-height: 1.6;
+      }
+
+      #overlay .start-btn {
+        margin-top: 2rem;
+        padding: 1rem 2rem;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border: none;
+        border-radius: 8px;
+        color: white;
+        font-size: 1.2rem;
+        cursor: pointer;
+        transition: transform 0.2s;
+      }
+
+      #overlay .start-btn:hover {
+        transform: scale(1.05);
+      }
+
+      #loading {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        color: white;
+        font-size: 1.5rem;
+        z-index: 50;
+        transition: opacity 0.3s;
+      }
+
+      .input_video {
+        display: none;
+      }
+
+      #three-canvas {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+      }
+
+      #debug-canvas {
+        position: fixed;
+        bottom: 10px;
+        right: 10px;
+        width: 320px;
+        height: 180px;
+        border: 2px solid #333;
+        border-radius: 8px;
+        transform: scaleX(-1);
+        z-index: 10;
+        opacity: 0.8;
+      }
+
+      .status {
+        position: fixed;
+        top: 10px;
+        left: 10px;
+        color: white;
+        font-family: monospace;
+        font-size: 12px;
+        background: rgba(0, 0, 0, 0.7);
+        padding: 10px 15px;
+        border-radius: 8px;
+        z-index: 10;
+        line-height: 1.8;
+      }
+
+      .controls {
+        position: fixed;
+        bottom: 10px;
+        left: 10px;
+        z-index: 10;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .control-group {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        background: rgba(0, 0, 0, 0.7);
+        padding: 8px 12px;
+        border-radius: 6px;
+        color: white;
+        font-size: 12px;
+      }
+
+      .control-group label {
+        min-width: 100px;
+      }
+
+      .control-group input[type="range"] {
+        width: 100px;
+      }
+
+      .control-group input[type="checkbox"] {
+        cursor: pointer;
+      }
+    </style>
+
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/holistic/holistic.js" crossorigin="anonymous"></script>
+
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+          "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="overlay">
+      <h1>🧲 Ferrofluid Face</h1>
+      <p>
+        Your face becomes a ball of ferrofluid, and your hands are magnets.
+        Move your hands close to your face to see beautiful spike patterns emerge!
+      </p>
+      <button class="start-btn">Click to Start</button>
+    </div>
+
+    <div id="loading">Loading...</div>
+
+    <video class="input_video"></video>
+    <canvas id="three-canvas"></canvas>
+    <canvas id="debug-canvas"></canvas>
+
+    <div class="status" id="status">
+      Face: --<br />
+      Left Hand: --<br />
+      Right Hand: --
+    </div>
+
+    <div class="controls">
+      <div class="control-group">
+        <label>Spike Height:</label>
+        <input type="range" id="spikeHeight" min="0" max="100" value="50" />
+        <span id="spikeHeightValue">50</span>
+      </div>
+      <div class="control-group">
+        <label>Spike Density:</label>
+        <input type="range" id="spikeDensity" min="10" max="100" value="40" />
+        <span id="spikeDensityValue">40</span>
+      </div>
+      <div class="control-group">
+        <label>Spike Sharpness:</label>
+        <input type="range" id="spikeSharpness" min="10" max="80" value="40" />
+        <span id="spikeSharpnessValue">40</span>
+      </div>
+      <div class="control-group">
+        <label>Animation Speed:</label>
+        <input type="range" id="animSpeed" min="0" max="100" value="30" />
+        <span id="animSpeedValue">30</span>
+      </div>
+      <div class="control-group">
+        <input type="checkbox" id="showDebug" checked />
+        <label>Show Camera Preview</label>
+      </div>
+    </div>
+
+    <script type="module">
+      import * as THREE from "three";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+      import { RGBELoader } from "three/addons/loaders/RGBELoader.js";
+
+      // --- DOM ELEMENTS ---
+      const overlay = document.getElementById("overlay");
+      const loadingEl = document.getElementById("loading");
+      const videoElement = document.querySelector(".input_video");
+      const debugCanvas = document.getElementById("debug-canvas");
+      const debugCtx = debugCanvas.getContext("2d");
+      const threeCanvas = document.getElementById("three-canvas");
+      const statusEl = document.getElementById("status");
+
+      // Controls
+      const spikeHeightSlider = document.getElementById("spikeHeight");
+      const spikeDensitySlider = document.getElementById("spikeDensity");
+      const spikeSharpnessSlider = document.getElementById("spikeSharpness");
+      const animSpeedSlider = document.getElementById("animSpeed");
+      const showDebugCheckbox = document.getElementById("showDebug");
+
+      // --- TRACKING DATA ---
+      let faceCenter = null;
+      let faceSize = 0;
+      let leftHandPos = null;
+      let rightHandPos = null;
+      let isTracking = false;
+
+      // --- THREE.JS SCENE SETUP ---
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x000000);
+
+      const camera = new THREE.PerspectiveCamera(
+        45,
+        window.innerWidth / window.innerHeight,
+        0.1,
+        100
+      );
+      camera.position.set(0, 0, 5);
+
+      const renderer = new THREE.WebGLRenderer({
+        canvas: threeCanvas,
+        antialias: true,
+        powerPreference: "high-performance",
+      });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.2;
+
+      // OrbitControls for debugging (enable by setting controls.enabled = true)
+      const controls = new OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.05;
+      controls.enabled = false; // Disabled by default, available for debugging
+
+      // --- PMREM Generator for environment maps ---
+      const pmremGenerator = new THREE.PMREMGenerator(renderer);
+      pmremGenerator.compileEquirectangularShader();
+
+      // --- LOAD HDRI ENVIRONMENT ---
+      const rgbeLoader = new RGBELoader();
+      rgbeLoader.load(
+        "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/studio_small_09_1k.hdr",
+        (texture) => {
+          const envMap = pmremGenerator.fromEquirectangular(texture).texture;
+          scene.environment = envMap;
+          texture.dispose();
+          loadingEl.style.opacity = "0";
+        }
+      );
+
+      // --- FERROFLUID SHADER ---
+      const ferrofluidVertexShader = `
+        uniform float uTime;
+        uniform float uForce;
+        uniform float uDensity;
+        uniform float uSharpness;
+        uniform vec3 uMagnet1;
+        uniform vec3 uMagnet2;
+        uniform float uMagnet1Active;
+        uniform float uMagnet2Active;
+        uniform float uMagnet1Distance;
+        uniform float uMagnet2Distance;
+
+        varying vec3 vNormal;
+        varying vec3 vPosition;
+        varying float vDisplacement;
+
+        // Simplex 3D Noise
+        vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+        vec4 mod289(vec4 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+        vec4 permute(vec4 x) { return mod289(((x*34.0)+1.0)*x); }
+        vec4 taylorInvSqrt(vec4 r) { return 1.79284291400159 - 0.85373472095314 * r; }
+
+        float snoise(vec3 v) {
+          const vec2 C = vec2(1.0/6.0, 1.0/3.0);
+          const vec4 D = vec4(0.0, 0.5, 1.0, 2.0);
+
+          vec3 i = floor(v + dot(v, C.yyy));
+          vec3 x0 = v - i + dot(i, C.xxx);
+
+          vec3 g = step(x0.yzx, x0.xyz);
+          vec3 l = 1.0 - g;
+          vec3 i1 = min(g.xyz, l.zxy);
+          vec3 i2 = max(g.xyz, l.zxy);
+
+          vec3 x1 = x0 - i1 + C.xxx;
+          vec3 x2 = x0 - i2 + C.yyy;
+          vec3 x3 = x0 - D.yyy;
+
+          i = mod289(i);
+          vec4 p = permute(permute(permute(
+            i.z + vec4(0.0, i1.z, i2.z, 1.0))
+            + i.y + vec4(0.0, i1.y, i2.y, 1.0))
+            + i.x + vec4(0.0, i1.x, i2.x, 1.0));
+
+          float n_ = 1.0/7.0;
+          vec3 ns = n_ * D.wyz - D.xzx;
+
+          vec4 j = p - 49.0 * floor(p * ns.z * ns.z);
+
+          vec4 x_ = floor(j * ns.z);
+          vec4 y_ = floor(j - 7.0 * x_);
+
+          vec4 x = x_ * ns.x + ns.yyyy;
+          vec4 y = y_ * ns.x + ns.yyyy;
+          vec4 h = 1.0 - abs(x) - abs(y);
+
+          vec4 b0 = vec4(x.xy, y.xy);
+          vec4 b1 = vec4(x.zw, y.zw);
+
+          vec4 s0 = floor(b0) * 2.0 + 1.0;
+          vec4 s1 = floor(b1) * 2.0 + 1.0;
+          vec4 sh = -step(h, vec4(0.0));
+
+          vec4 a0 = b0.xzyw + s0.xzyw * sh.xxyy;
+          vec4 a1 = b1.xzyw + s1.xzyw * sh.zzww;
+
+          vec3 p0 = vec3(a0.xy, h.x);
+          vec3 p1 = vec3(a0.zw, h.y);
+          vec3 p2 = vec3(a1.xy, h.z);
+          vec3 p3 = vec3(a1.zw, h.w);
+
+          vec4 norm = taylorInvSqrt(vec4(dot(p0,p0), dot(p1,p1), dot(p2,p2), dot(p3,p3)));
+          p0 *= norm.x;
+          p1 *= norm.y;
+          p2 *= norm.z;
+          p3 *= norm.w;
+
+          vec4 m = max(0.6 - vec4(dot(x0,x0), dot(x1,x1), dot(x2,x2), dot(x3,x3)), 0.0);
+          m = m * m;
+          return 42.0 * dot(m*m, vec4(dot(p0,x0), dot(p1,x1), dot(p2,x2), dot(p3,x3)));
+        }
+
+        float getMagnetInfluence(vec3 pos, vec3 magnetPos, float magnetActive, float magnetDistance) {
+          if (magnetActive < 0.5) return 0.0;
+          
+          // Calculate direction from sphere surface to magnet
+          vec3 toMagnet = magnetPos - pos;
+          float dist = length(toMagnet);
+          
+          // Influence falls off with distance
+          // magnetDistance controls how close the hand is (0 = far, 1 = touching)
+          float proximity = magnetDistance;
+          
+          // Spikes should form towards the magnet
+          // Use dot product to favor spikes pointing at magnet
+          vec3 magnetDir = normalize(toMagnet);
+          float alignment = max(0.0, dot(normalize(pos), magnetDir));
+          
+          // Combine proximity and alignment for spike formation
+          float influence = proximity * (0.3 + 0.7 * alignment);
+          
+          return influence;
+        }
+
+        void main() {
+          vec3 pos = position;
+          vec3 norm = normal;
+
+          // Base noise for organic movement
+          float baseNoise = snoise(pos * uDensity + uTime * 0.5);
+          
+          // Calculate magnet influences
+          float magnet1Influence = getMagnetInfluence(pos, uMagnet1, uMagnet1Active, uMagnet1Distance);
+          float magnet2Influence = getMagnetInfluence(pos, uMagnet2, uMagnet2Active, uMagnet2Distance);
+          float totalMagnetInfluence = max(magnet1Influence, magnet2Influence);
+          
+          // When magnets are active, create spike patterns
+          float spikeNoise = snoise(pos * uDensity * 2.0 + uTime);
+          float spikes = pow(abs(spikeNoise), uSharpness);
+          
+          // Blend between calm and spiked states
+          float displacement = 0.0;
+          
+          // Always have subtle movement
+          displacement += baseNoise * 0.02;
+          
+          // Add spikes when magnets are nearby
+          displacement += spikes * uForce * totalMagnetInfluence;
+          
+          // Displace along normal
+          pos += norm * displacement;
+          
+          vDisplacement = displacement;
+          vNormal = normalMatrix * norm;
+          vPosition = (modelViewMatrix * vec4(pos, 1.0)).xyz;
+
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+        }
+      `;
+
+      const ferrofluidFragmentShader = `
+        uniform vec3 uColor;
+        uniform float uRoughness;
+        uniform float uMetalness;
+        uniform samplerCube uEnvMap;
+
+        varying vec3 vNormal;
+        varying vec3 vPosition;
+        varying float vDisplacement;
+
+        void main() {
+          vec3 normal = normalize(vNormal);
+          vec3 viewDir = normalize(-vPosition);
+          
+          // Fresnel effect for metallic look
+          float fresnel = pow(1.0 - max(dot(normal, viewDir), 0.0), 3.0);
+          
+          // Base color with displacement-based tinting
+          vec3 baseColor = uColor;
+          
+          // Add slight color variation based on displacement
+          float displaceColor = vDisplacement * 5.0;
+          baseColor = mix(baseColor, vec3(0.1, 0.1, 0.15), clamp(displaceColor, 0.0, 0.3));
+          
+          // Simple metallic shading
+          vec3 reflection = reflect(-viewDir, normal);
+          
+          // Environment reflection approximation
+          float envLight = 0.3 + 0.7 * max(0.0, reflection.y);
+          
+          // Combine
+          vec3 finalColor = baseColor * (0.3 + 0.7 * envLight);
+          finalColor += fresnel * vec3(0.3, 0.3, 0.35) * uMetalness;
+          
+          // Add rim lighting for dramatic effect
+          float rim = 1.0 - max(dot(normal, viewDir), 0.0);
+          rim = pow(rim, 4.0);
+          finalColor += rim * vec3(0.1, 0.1, 0.2);
+
+          gl_FragColor = vec4(finalColor, 1.0);
+        }
+      `;
+
+      // --- CREATE FERROFLUID SPHERE ---
+      // Subdivision level 48 provides ~27,650 triangles - good balance of detail and performance
+      const sphereGeometry = new THREE.IcosahedronGeometry(1, 48);
+      
+      const ferrofluidUniforms = {
+        uTime: { value: 0 },
+        uForce: { value: 0.5 },
+        uDensity: { value: 4.0 },
+        uSharpness: { value: 0.4 },
+        uMagnet1: { value: new THREE.Vector3(10, 0, 0) },
+        uMagnet2: { value: new THREE.Vector3(-10, 0, 0) },
+        uMagnet1Active: { value: 0.0 },
+        uMagnet2Active: { value: 0.0 },
+        uMagnet1Distance: { value: 0.0 },
+        uMagnet2Distance: { value: 0.0 },
+        uColor: { value: new THREE.Color(0x050508) },
+        uRoughness: { value: 0.15 },
+        uMetalness: { value: 0.9 },
+      };
+
+      const ferrofluidMaterial = new THREE.ShaderMaterial({
+        uniforms: ferrofluidUniforms,
+        vertexShader: ferrofluidVertexShader,
+        fragmentShader: ferrofluidFragmentShader,
+        side: THREE.DoubleSide,
+      });
+
+      const ferrofluidSphere = new THREE.Mesh(sphereGeometry, ferrofluidMaterial);
+      scene.add(ferrofluidSphere);
+
+      // --- LIGHTING ---
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.3);
+      scene.add(ambientLight);
+
+      const directionalLight = new THREE.DirectionalLight(0xffffff, 1.5);
+      directionalLight.position.set(5, 5, 5);
+      scene.add(directionalLight);
+
+      const backLight = new THREE.DirectionalLight(0x4466ff, 0.5);
+      backLight.position.set(-5, -5, -5);
+      scene.add(backLight);
+
+      // --- HAND INDICATOR SPHERES (optional visual) ---
+      const handMaterial = new THREE.MeshBasicMaterial({
+        color: 0xff4444,
+        transparent: true,
+        opacity: 0.3,
+      });
+      const handGeometry = new THREE.SphereGeometry(0.1, 16, 16);
+      
+      const leftHandMarker = new THREE.Mesh(handGeometry, handMaterial.clone());
+      leftHandMarker.material.color.setHex(0xff8800);
+      leftHandMarker.visible = false;
+      scene.add(leftHandMarker);
+
+      const rightHandMarker = new THREE.Mesh(handGeometry, handMaterial.clone());
+      rightHandMarker.material.color.setHex(0x00ddff);
+      rightHandMarker.visible = false;
+      scene.add(rightHandMarker);
+
+      // --- MEDIAPIPE HOLISTIC SETUP ---
+      const holistic = new Holistic({
+        locateFile: (file) =>
+          `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${file}`,
+      });
+
+      holistic.setOptions({
+        modelComplexity: 1,
+        smoothLandmarks: true,
+        enableSegmentation: false,
+        refineFaceLandmarks: true,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5,
+      });
+
+      // Convert normalized MediaPipe coordinates (0-1) to 3D scene space
+      // x, y: 0-1 normalized -> -2 to +2 scene units (centered at origin)
+      // z: depth value -> offset towards camera (positive z is towards viewer)
+      function normalizedTo3D(x, y, z = 0) {
+        const x3d = (x - 0.5) * 4;  // Map [0,1] to [-2,2]
+        const y3d = -(y - 0.5) * 4; // Map [0,1] to [2,-2] (flip for screen coords)
+        const z3d = -z * 2 + 1;     // Map [0,1] to [1,-1] (depth adjustment)
+        return new THREE.Vector3(x3d, y3d, z3d);
+      }
+
+      // Calculate center of landmarks
+      function getLandmarksCenter(landmarks) {
+        if (!landmarks || landmarks.length === 0) return null;
+        
+        let sumX = 0, sumY = 0, sumZ = 0;
+        for (const lm of landmarks) {
+          sumX += lm.x;
+          sumY += lm.y;
+          sumZ += lm.z || 0;
+        }
+        
+        return {
+          x: sumX / landmarks.length,
+          y: sumY / landmarks.length,
+          z: sumZ / landmarks.length,
+        };
+      }
+
+      // Calculate bounding box size of landmarks
+      function getLandmarksSize(landmarks) {
+        if (!landmarks || landmarks.length === 0) return 0;
+        
+        let minX = Infinity, maxX = -Infinity;
+        let minY = Infinity, maxY = -Infinity;
+        
+        for (const lm of landmarks) {
+          minX = Math.min(minX, lm.x);
+          maxX = Math.max(maxX, lm.x);
+          minY = Math.min(minY, lm.y);
+          maxY = Math.max(maxY, lm.y);
+        }
+        
+        return Math.max(maxX - minX, maxY - minY);
+      }
+
+      holistic.onResults((results) => {
+        isTracking = true;
+
+        // Draw debug preview
+        if (showDebugCheckbox.checked) {
+          debugCanvas.width = 320;
+          debugCanvas.height = 180;
+          debugCtx.drawImage(results.image, 0, 0, 320, 180);
+        }
+
+        // Track face
+        if (results.faceLandmarks) {
+          faceCenter = getLandmarksCenter(results.faceLandmarks);
+          faceSize = getLandmarksSize(results.faceLandmarks);
+        } else {
+          faceCenter = null;
+          faceSize = 0;
+        }
+
+        // Track left hand (palm center - average of key points)
+        if (results.leftHandLandmarks) {
+          // Use wrist (0) and middle finger MCP (9) for palm center
+          const wrist = results.leftHandLandmarks[0];
+          const middleMCP = results.leftHandLandmarks[9];
+          leftHandPos = {
+            x: (wrist.x + middleMCP.x) / 2,
+            y: (wrist.y + middleMCP.y) / 2,
+            z: (wrist.z + middleMCP.z) / 2,
+          };
+        } else {
+          leftHandPos = null;
+        }
+
+        // Track right hand
+        if (results.rightHandLandmarks) {
+          const wrist = results.rightHandLandmarks[0];
+          const middleMCP = results.rightHandLandmarks[9];
+          rightHandPos = {
+            x: (wrist.x + middleMCP.x) / 2,
+            y: (wrist.y + middleMCP.y) / 2,
+            z: (wrist.z + middleMCP.z) / 2,
+          };
+        } else {
+          rightHandPos = null;
+        }
+
+        // Update status
+        statusEl.innerHTML = `
+          Face: ${faceCenter ? "✓ Tracking" : "-- Not detected"}<br />
+          Left Hand: ${leftHandPos ? "✓ Tracking" : "-- Not detected"}<br />
+          Right Hand: ${rightHandPos ? "✓ Tracking" : "-- Not detected"}
+        `;
+      });
+
+      // --- CAMERA SETUP ---
+      let cameraStarted = false;
+
+      function startCamera() {
+        if (cameraStarted) return;
+        cameraStarted = true;
+
+        const cam = new Camera(videoElement, {
+          onFrame: async () => {
+            await holistic.send({ image: videoElement });
+          },
+          width: 1280,
+          height: 720,
+        });
+
+        cam.start();
+      }
+
+      // --- START EXPERIENCE ---
+      overlay.addEventListener("click", () => {
+        overlay.style.opacity = "0";
+        setTimeout(() => overlay.remove(), 500);
+        startCamera();
+      });
+
+      // --- CONTROL EVENT HANDLERS ---
+      spikeHeightSlider.addEventListener("input", (e) => {
+        document.getElementById("spikeHeightValue").textContent = e.target.value;
+        ferrofluidUniforms.uForce.value = e.target.value / 100;
+      });
+
+      spikeDensitySlider.addEventListener("input", (e) => {
+        document.getElementById("spikeDensityValue").textContent = e.target.value;
+        ferrofluidUniforms.uDensity.value = e.target.value / 10;
+      });
+
+      spikeSharpnessSlider.addEventListener("input", (e) => {
+        document.getElementById("spikeSharpnessValue").textContent = e.target.value;
+        ferrofluidUniforms.uSharpness.value = e.target.value / 100;
+      });
+
+      animSpeedSlider.addEventListener("input", (e) => {
+        document.getElementById("animSpeedValue").textContent = e.target.value;
+      });
+
+      showDebugCheckbox.addEventListener("change", (e) => {
+        debugCanvas.style.display = e.target.checked ? "block" : "none";
+      });
+
+      // --- ANIMATION LOOP ---
+      const clock = new THREE.Clock();
+
+      function animate() {
+        requestAnimationFrame(animate);
+
+        const delta = clock.getDelta();
+        const elapsed = clock.getElapsedTime();
+        const animSpeed = animSpeedSlider.value / 100;
+
+        // Update time uniform
+        ferrofluidUniforms.uTime.value = elapsed * animSpeed;
+
+        // Update magnet positions based on hand tracking
+        if (faceCenter) {
+          // Position the sphere at face location
+          const facePosNorm = normalizedTo3D(faceCenter.x, faceCenter.y, faceCenter.z);
+          // Scale sphere: minimum 0.5 units, scaled by faceSize (typically 0.1-0.3 normalized)
+          // Multiplier of 4 converts normalized face size to reasonable scene units
+          const scale = Math.max(0.5, faceSize * 4);
+          ferrofluidSphere.scale.setScalar(scale);
+          
+          // Keep sphere centered in view - face size controls sphere scale
+          ferrofluidSphere.position.set(0, 0, 0);
+        }
+
+        // Update left hand magnet
+        if (leftHandPos && faceCenter) {
+          const handPos = normalizedTo3D(leftHandPos.x, leftHandPos.y, leftHandPos.z);
+          ferrofluidUniforms.uMagnet1.value.copy(handPos);
+          ferrofluidUniforms.uMagnet1Active.value = 1.0;
+
+          // Calculate distance from hand to face center in normalized coords
+          const dx = leftHandPos.x - faceCenter.x;
+          const dy = leftHandPos.y - faceCenter.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          
+          // Convert distance to influence (closer = more influence)
+          // faceSize * 1.5 defines the "interaction zone" - hand within 1.5x face size
+          // triggers full influence, beyond that it falls off linearly
+          const normalizedDist = dist / (faceSize * 1.5);
+          const influence = Math.max(0, 1 - normalizedDist);
+          ferrofluidUniforms.uMagnet1Distance.value = influence;
+
+          // Update visual marker
+          leftHandMarker.position.copy(handPos);
+          leftHandMarker.visible = true;
+          leftHandMarker.scale.setScalar(0.5 + influence * 0.5);
+        } else {
+          ferrofluidUniforms.uMagnet1Active.value = 0.0;
+          ferrofluidUniforms.uMagnet1Distance.value = 0.0;
+          leftHandMarker.visible = false;
+        }
+
+        // Update right hand magnet
+        if (rightHandPos && faceCenter) {
+          const handPos = normalizedTo3D(rightHandPos.x, rightHandPos.y, rightHandPos.z);
+          ferrofluidUniforms.uMagnet2.value.copy(handPos);
+          ferrofluidUniforms.uMagnet2Active.value = 1.0;
+
+          // Calculate distance from hand to face center in normalized coords
+          const dx = rightHandPos.x - faceCenter.x;
+          const dy = rightHandPos.y - faceCenter.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          
+          // Same interaction zone calculation as left hand
+          const normalizedDist = dist / (faceSize * 1.5);
+          const influence = Math.max(0, 1 - normalizedDist);
+          ferrofluidUniforms.uMagnet2Distance.value = influence;
+
+          // Update visual marker
+          rightHandMarker.position.copy(handPos);
+          rightHandMarker.visible = true;
+          rightHandMarker.scale.setScalar(0.5 + influence * 0.5);
+        } else {
+          ferrofluidUniforms.uMagnet2Active.value = 0.0;
+          ferrofluidUniforms.uMagnet2Distance.value = 0.0;
+          rightHandMarker.visible = false;
+        }
+
+        // Gentle rotation when no hands detected
+        if (!leftHandPos && !rightHandPos) {
+          ferrofluidSphere.rotation.y += delta * 0.2;
+        }
+
+        controls.update();
+        renderer.render(scene, camera);
+      }
+
+      // --- WINDOW RESIZE ---
+      window.addEventListener("resize", () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+
+      // Start animation
+      animate();
+    </script>
+  </body>
+</html>
