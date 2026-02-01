@@ -224,14 +224,14 @@
         <span id="opacityValue">70%</span>
       </div>
       <div class="control-group">
-        <label>Hand Size:</label>
-        <input type="range" id="handSize" min="5" max="40" value="15" />
-        <span id="handSizeValue">0.15</span>
+        <label>Hand Scale:</label>
+        <input type="range" id="handSize" min="50" max="200" value="120" />
+        <span id="handSizeValue">1.2x</span>
       </div>
       <div class="control-group">
-        <label>Face Size:</label>
-        <input type="range" id="faceSize" min="10" max="50" value="25" />
-        <span id="faceSizeValue">0.25</span>
+        <label>Face Scale:</label>
+        <input type="range" id="faceSize" min="50" max="200" value="100" />
+        <span id="faceSizeValue">1.0x</span>
       </div>
     </div>
 
@@ -277,9 +277,10 @@
       const faceSizeSlider = document.getElementById("faceSize");
       const faceSizeValue = document.getElementById("faceSizeValue");
 
-      // 3D Box sizes (adjustable via sliders)
-      let HAND_BOX_SIZE = 0.15;
-      let FACE_BOX_SIZE = 0.25;
+      // 3D Box scale multipliers (adjustable via sliders)
+      // 1.0 = exact bounding box size, >1.0 = larger, <1.0 = smaller
+      let HAND_SCALE_MULTIPLIER = 1.2;
+      let FACE_SCALE_MULTIPLIER = 1.0;
 
       // Colors
       const FACE_COLOR = 0x4a90d9; // Blue
@@ -396,16 +397,23 @@
         // 152: chin center, 10: top of forehead (vertical axis)
         // 1: nose tip (forward reference)
         
-        // Calculate center of face using bounding box
+        // Calculate bounding box from face landmarks
         const bbox = new THREE.Box3().setFromPoints(facePoints);
         const center = new THREE.Vector3();
         bbox.getCenter(center);
+        
+        // Get bounding box dimensions for dynamic scaling
+        const size = new THREE.Vector3();
+        bbox.getSize(size);
 
         // Position mesh at face center
         mesh.position.copy(center);
 
-        // Set scale based on slider
-        mesh.scale.set(FACE_BOX_SIZE, FACE_BOX_SIZE, FACE_BOX_SIZE);
+        // Set scale based on actual landmark dimensions * multiplier
+        // Use the largest dimension to maintain aspect ratio
+        const maxDim = Math.max(size.x, size.y, size.z);
+        const scaleValue = maxDim * FACE_SCALE_MULTIPLIER;
+        mesh.scale.set(scaleValue, scaleValue, scaleValue);
 
         // Calculate orientation from key face landmarks
         // Use outer eye corners for horizontal axis
@@ -446,16 +454,23 @@
       function positionAndOrientHandBox(mesh, handPoints) {
         if (handPoints.length < 21) return;
 
-        // Calculate center of hand using bounding box
+        // Calculate bounding box from hand landmarks
         const bbox = new THREE.Box3().setFromPoints(handPoints);
         const center = new THREE.Vector3();
         bbox.getCenter(center);
+        
+        // Get bounding box dimensions for dynamic scaling
+        const size = new THREE.Vector3();
+        bbox.getSize(size);
 
         // Position mesh at hand center
         mesh.position.copy(center);
 
-        // Set scale based on slider
-        mesh.scale.set(HAND_BOX_SIZE, HAND_BOX_SIZE, HAND_BOX_SIZE);
+        // Set scale based on actual landmark dimensions * multiplier
+        // Use the largest dimension to maintain aspect ratio
+        const maxDim = Math.max(size.x, size.y, size.z);
+        const scaleValue = maxDim * HAND_SCALE_MULTIPLIER;
+        mesh.scale.set(scaleValue, scaleValue, scaleValue);
 
         // Hand landmarks:
         // 0: wrist
@@ -703,13 +718,15 @@
       });
 
       handSizeSlider.addEventListener("input", (e) => {
-        HAND_BOX_SIZE = e.target.value / 100;
-        handSizeValue.textContent = HAND_BOX_SIZE.toFixed(2);
+        // Slider range: 50-200, representing 0.5x to 2.0x scale multiplier
+        HAND_SCALE_MULTIPLIER = e.target.value / 100;
+        handSizeValue.textContent = HAND_SCALE_MULTIPLIER.toFixed(1) + "x";
       });
 
       faceSizeSlider.addEventListener("input", (e) => {
-        FACE_BOX_SIZE = e.target.value / 100;
-        faceSizeValue.textContent = FACE_BOX_SIZE.toFixed(2);
+        // Slider range: 50-200, representing 0.5x to 2.0x scale multiplier
+        FACE_SCALE_MULTIPLIER = e.target.value / 100;
+        faceSizeValue.textContent = FACE_SCALE_MULTIPLIER.toFixed(1) + "x";
       });
 
       // Initialize MediaPipe Holistic
