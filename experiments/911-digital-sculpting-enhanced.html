@@ -398,16 +398,21 @@
         isPinching: false,
         isSculpting: false,
         lastPinchPos: null,
+        lastHitPoint: null,
+        lastHitNormal: null,
       };
 
       const sculptingStateRight = {
         isPinching: false,
         isSculpting: false,
         lastPinchPos: null,
+        lastHitPoint: null,
+        lastHitNormal: null,
       };
 
-      // Pinch detection threshold (normalized distance)
-      const PINCH_THRESHOLD = 0.05;
+      // Pinch detection threshold (normalized distance) - relaxed for easier pinching
+      const PINCH_THRESHOLD = 0.08;
+      const PINCH_RELEASE_THRESHOLD = 0.12; // Hysteresis to prevent flickering
 
       // --- COORDINATE CONVERSION ---
       function convertToThreeJS(landmarks) {
@@ -478,7 +483,7 @@
       }
 
       // --- SCULPTING LOGIC ---
-      function sculpt(point, normal, direction) {
+      function sculpt(point, normal, direction, magnitude = 1.0) {
         if (!clayMesh || !clayMesh.visible) return;
 
         const radius = brushRadiusSlider.value / 100 * 0.3; // Scale to reasonable world units
@@ -503,7 +508,8 @@
           if (dist < radius) {
             // Smooth Cosine Falloff
             const falloff = 0.5 * (1 + Math.cos((Math.PI * dist) / radius));
-            const force = intensity * falloff * 0.02;
+            // Increased force multiplier from 0.02 to 0.08 for more dramatic effects
+            const force = intensity * falloff * 0.08 * magnitude;
 
             // Apply force along the surface normal
             if (direction > 0) {
@@ -568,12 +574,16 @@
           sculptingState.isPinching = false;
           sculptingState.isSculpting = false;
           sculptingState.lastPinchPos = null;
+          sculptingState.lastHitPoint = null;
+          sculptingState.lastHitNormal = null;
           cursor.visible = false;
           return { isPinching: false, isSculpting: false };
         }
 
         const pinchDist = getPinchDistance(handLandmarks);
-        const isPinching = pinchDist < PINCH_THRESHOLD;
+        // Debounced pinch detection with hysteresis
+        const threshold = sculptingState.isPinching ? PINCH_RELEASE_THRESHOLD : PINCH_THRESHOLD;
+        const isPinching = pinchDist < threshold;
         const pinchPos = getPinchPosition(handLandmarks);
 
         // Convert pinch position to normalized device coordinates for raycasting
@@ -584,42 +594,81 @@
         const intersects = raycaster.intersectObject(clayMesh);
         const isColliding = intersects.length > 0;
 
-        // Update cursor
-        updateCursor(cursor, cursorMaterial, pinchPos, isPinching && isColliding, isColliding);
+        // Update cursor (show it when actively sculpting or when hovering over clay)
+        const showCursor = (sculptingState.isSculpting && isPinching) || isColliding;
+        updateCursor(cursor, cursorMaterial, pinchPos, isPinching && sculptingState.isSculpting, showCursor);
 
-        if (isPinching && isColliding) {
-          const hit = intersects[0];
-
-          if (!sculptingState.isPinching) {
-            // Just started pinching on the clay
+        if (isPinching) {
+          if (!sculptingState.isSculpting && isColliding) {
+            // Just started pinching on the clay - initialize sculpting
+            const hit = intersects[0];
             sculptingState.isPinching = true;
             sculptingState.isSculpting = true;
             sculptingState.lastPinchPos = pinchPos;
-          } else {
-            // Continue sculpting - calculate direction based on Z movement
+            sculptingState.lastHitPoint = hit.point.clone();
+            sculptingState.lastHitNormal = hit.face.normal.clone();
+            return { isPinching: true, isSculpting: true };
+          } else if (sculptingState.isSculpting) {
+            // Continue sculpting - even if not directly intersecting
+            // Calculate direction and magnitude based on Z movement
             const zDelta = sculptingState.lastPinchPos.z - pinchPos.z;
             const direction = zDelta > 0 ? 1 : -1;
+            const magnitude = Math.abs(zDelta) * 100; // Amplify movement
 
-            // Only sculpt if there's significant movement
-            if (Math.abs(zDelta) > 0.002) {
-              sculpt(hit.point, hit.face.normal, direction);
+            // Determine the sculpting point and normal
+            let sculptPoint, sculptNormal;
+            
+            if (isColliding) {
+              // Hand is over clay - use actual intersection
+              const hit = intersects[0];
+              sculptPoint = hit.point;
+              sculptNormal = hit.face.normal;
+              // Update last known hit point
+              sculptingState.lastHitPoint = hit.point.clone();
+              sculptingState.lastHitNormal = hit.face.normal.clone();
+            } else {
+              // Hand has lifted off but pinch is maintained
+              // Convert current hand position to 3D world space
+              const handPoints = convertToThreeJS([pinchPos]);
+              const currentHandPos = handPoints[0];
+              
+              // Use the last hit point as the sculpting center
+              sculptPoint = sculptingState.lastHitPoint;
+              sculptNormal = sculptingState.lastHitNormal;
+              
+              // Calculate distance from last hit to current hand position
+              const distance = currentHandPos.distanceTo(sculptPoint);
+              // Use increased magnitude based on how far the hand has moved
+              const pullMagnitude = Math.max(1.0, distance * 5.0);
+              
+              // Only sculpt if there's significant movement
+              if (Math.abs(zDelta) > 0.001 && sculptPoint && sculptNormal) {
+                sculpt(sculptPoint, sculptNormal, direction, pullMagnitude);
+              }
+              
+              sculptingState.lastPinchPos = pinchPos;
+              return { isPinching: true, isSculpting: true };
+            }
+
+            // Sculpt with amplified magnitude
+            if (Math.abs(zDelta) > 0.001 && sculptPoint && sculptNormal) {
+              sculpt(sculptPoint, sculptNormal, direction, Math.max(1.0, magnitude));
             }
 
             sculptingState.lastPinchPos = pinchPos;
-          }
-
-          return { isPinching: true, isSculpting: true };
-        } else if (isPinching && !isColliding) {
-          // Pinching but not over clay
-          if (sculptingState.isPinching) {
+            return { isPinching: true, isSculpting: true };
+          } else {
+            // Pinching but not over clay and haven't started sculpting yet
             sculptingState.lastPinchPos = pinchPos;
+            return { isPinching: true, isSculpting: false };
           }
-          return { isPinching: true, isSculpting: false };
         } else {
-          // Released pinch
+          // Released pinch - reset everything
           sculptingState.isPinching = false;
           sculptingState.isSculpting = false;
           sculptingState.lastPinchPos = null;
+          sculptingState.lastHitPoint = null;
+          sculptingState.lastHitNormal = null;
           return { isPinching: false, isSculpting: false };
         }
       }
@@ -741,6 +790,8 @@
           sculptingStateLeft.isPinching = false;
           sculptingStateLeft.isSculpting = false;
           sculptingStateLeft.lastPinchPos = null;
+          sculptingStateLeft.lastHitPoint = null;
+          sculptingStateLeft.lastHitNormal = null;
           leftCursor.visible = false;
         }
 
@@ -768,6 +819,8 @@
           sculptingStateRight.isPinching = false;
           sculptingStateRight.isSculpting = false;
           sculptingStateRight.lastPinchPos = null;
+          sculptingStateRight.lastHitPoint = null;
+          sculptingStateRight.lastHitNormal = null;
           rightCursor.visible = false;
         }
 
