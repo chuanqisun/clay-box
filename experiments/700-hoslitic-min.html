@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>MediaPipe Holistic</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/holistic/holistic.js" crossorigin="anonymous"></script>
+
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+        width: 100vw;
+        height: 100vh;
+      }
+
+      .container {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        background-color: #000;
+      }
+
+      .input_video {
+        display: none;
+      }
+
+      .output_canvas {
+        display: block;
+        transform: scaleX(-1);
+      }
+
+      .fps {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        color: white;
+        font-family: monospace;
+        font-size: 20px;
+        background: rgba(0, 0, 0, 0.5);
+        padding: 5px 10px;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="container">
+      <video class="input_video"></video>
+      <canvas class="output_canvas"></canvas>
+      <div class="fps">FPS: 0</div>
+    </div>
+
+    <script type="module">
+      const videoElement = document.querySelector(".input_video");
+      const canvasElement = document.querySelector(".output_canvas");
+      const canvasCtx = canvasElement.getContext("2d");
+      const fpsElement = document.querySelector(".fps");
+
+      let lastTime = performance.now();
+      let fps = 0;
+
+      function updateFPS() {
+        const now = performance.now();
+        fps = Math.round(1000 / (now - lastTime));
+        lastTime = now;
+        fpsElement.textContent = `FPS: ${fps}`;
+      }
+
+      function onResults(results) {
+        updateFPS();
+
+        canvasCtx.save();
+        canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+        canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+        // Draw pose
+        if (results.poseLandmarks) {
+          drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS, { color: "white" });
+          drawLandmarks(canvasCtx, results.poseLandmarks, { color: "white", fillColor: "rgb(0,217,231)" });
+        }
+
+        // Draw hands
+        if (results.rightHandLandmarks) {
+          drawConnectors(canvasCtx, results.rightHandLandmarks, HAND_CONNECTIONS, { color: "white" });
+          drawLandmarks(canvasCtx, results.rightHandLandmarks, { color: "white", fillColor: "rgb(0,217,231)" });
+        }
+        if (results.leftHandLandmarks) {
+          drawConnectors(canvasCtx, results.leftHandLandmarks, HAND_CONNECTIONS, { color: "white" });
+          drawLandmarks(canvasCtx, results.leftHandLandmarks, { color: "white", fillColor: "rgb(255,138,0)" });
+        }
+
+        canvasCtx.restore();
+      }
+
+      const holistic = new Holistic({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${file}`,
+      });
+
+      holistic.setOptions({
+        modelComplexity: 0,
+        smoothLandmarks: true,
+        enableSegmentation: false,
+        smoothSegmentation: false,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5,
+      });
+
+      holistic.onResults(onResults);
+
+      const camera = new Camera(videoElement, {
+        onFrame: async () => {
+          await holistic.send({ image: videoElement });
+        },
+        width: 1280,
+        height: 720,
+      });
+
+      camera.start();
+
+      function resizeCanvas() {
+        const videoWidth = videoElement.videoWidth;
+        const videoHeight = videoElement.videoHeight;
+
+        if (!videoWidth || !videoHeight) return;
+
+        const videoAspect = videoWidth / videoHeight;
+        const windowAspect = window.innerWidth / window.innerHeight;
+
+        let width, height;
+
+        if (windowAspect > videoAspect) {
+          height = window.innerHeight;
+          width = height * videoAspect;
+        } else {
+          width = window.innerWidth;
+          height = width / videoAspect;
+        }
+
+        canvasElement.width = width;
+        canvasElement.height = height;
+      }
+
+      videoElement.addEventListener("loadedmetadata", resizeCanvas);
+      window.addEventListener("resize", resizeCanvas);
+    </script>
+  </body>
+</html>
