@@ -258,11 +258,11 @@
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
       renderer.toneMappingExposure = 1.2;
 
-      // OrbitControls for debugging
+      // OrbitControls for debugging (enable by setting controls.enabled = true)
       const controls = new OrbitControls(camera, renderer.domElement);
       controls.enableDamping = true;
       controls.dampingFactor = 0.05;
-      controls.enabled = false; // Disable by default
+      controls.enabled = false; // Disabled by default, available for debugging
 
       // --- PMREM Generator for environment maps ---
       const pmremGenerator = new THREE.PMREMGenerator(renderer);
@@ -465,7 +465,8 @@
       `;
 
       // --- CREATE FERROFLUID SPHERE ---
-      const sphereGeometry = new THREE.IcosahedronGeometry(1, 64);
+      // Subdivision level 48 provides ~27,650 triangles - good balance of detail and performance
+      const sphereGeometry = new THREE.IcosahedronGeometry(1, 48);
       
       const ferrofluidUniforms = {
         uTime: { value: 0 },
@@ -538,12 +539,13 @@
         minTrackingConfidence: 0.5,
       });
 
-      // Convert normalized coordinates to 3D space
+      // Convert normalized MediaPipe coordinates (0-1) to 3D scene space
+      // x, y: 0-1 normalized -> -2 to +2 scene units (centered at origin)
+      // z: depth value -> offset towards camera (positive z is towards viewer)
       function normalizedTo3D(x, y, z = 0) {
-        // x, y are 0-1, convert to -2 to 2 range
-        const x3d = (x - 0.5) * 4;
-        const y3d = -(y - 0.5) * 4;
-        const z3d = -z * 2 + 1;
+        const x3d = (x - 0.5) * 4;  // Map [0,1] to [-2,2]
+        const y3d = -(y - 0.5) * 4; // Map [0,1] to [2,-2] (flip for screen coords)
+        const z3d = -z * 2 + 1;     // Map [0,1] to [1,-1] (depth adjustment)
         return new THREE.Vector3(x3d, y3d, z3d);
       }
 
@@ -702,11 +704,12 @@
         if (faceCenter) {
           // Position the sphere at face location
           const facePosNorm = normalizedTo3D(faceCenter.x, faceCenter.y, faceCenter.z);
-          // Scale sphere based on face size
+          // Scale sphere: minimum 0.5 units, scaled by faceSize (typically 0.1-0.3 normalized)
+          // Multiplier of 4 converts normalized face size to reasonable scene units
           const scale = Math.max(0.5, faceSize * 4);
           ferrofluidSphere.scale.setScalar(scale);
           
-          // For now, keep sphere centered - face controls scale
+          // Keep sphere centered in view - face size controls sphere scale
           ferrofluidSphere.position.set(0, 0, 0);
         }
 
@@ -716,13 +719,14 @@
           ferrofluidUniforms.uMagnet1.value.copy(handPos);
           ferrofluidUniforms.uMagnet1Active.value = 1.0;
 
-          // Calculate distance from hand to face center
+          // Calculate distance from hand to face center in normalized coords
           const dx = leftHandPos.x - faceCenter.x;
           const dy = leftHandPos.y - faceCenter.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
           
           // Convert distance to influence (closer = more influence)
-          // faceSize gives us a reference for what "close" means
+          // faceSize * 1.5 defines the "interaction zone" - hand within 1.5x face size
+          // triggers full influence, beyond that it falls off linearly
           const normalizedDist = dist / (faceSize * 1.5);
           const influence = Math.max(0, 1 - normalizedDist);
           ferrofluidUniforms.uMagnet1Distance.value = influence;
@@ -743,11 +747,12 @@
           ferrofluidUniforms.uMagnet2.value.copy(handPos);
           ferrofluidUniforms.uMagnet2Active.value = 1.0;
 
-          // Calculate distance from hand to face center
+          // Calculate distance from hand to face center in normalized coords
           const dx = rightHandPos.x - faceCenter.x;
           const dy = rightHandPos.y - faceCenter.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
           
+          // Same interaction zone calculation as left hand
           const normalizedDist = dist / (faceSize * 1.5);
           const influence = Math.max(0, 1 - normalizedDist);
           ferrofluidUniforms.uMagnet2Distance.value = influence;
