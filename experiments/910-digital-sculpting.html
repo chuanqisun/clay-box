@@ -376,9 +376,9 @@
       // Get face center from landmarks
       function getFaceCenter(faceLandmarks) {
         if (!faceLandmarks || faceLandmarks.length < 468) return null;
-        // Use nose tip (landmark 1) as face center
-        const noseTip = faceLandmarks[1];
-        return { x: noseTip.x, y: noseTip.y, z: noseTip.z };
+        // Use landmark 1 (nose bridge area) as face center reference
+        const faceCenter = faceLandmarks[1];
+        return { x: faceCenter.x, y: faceCenter.y, z: faceCenter.z };
       }
 
       // Check if hand is colliding with face area
