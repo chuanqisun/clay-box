@@ -192,9 +192,7 @@
   </head>
   <body>
     <h1>Voxel Sculpting - Hand Tracking</h1>
-    <p class="description">
-      Sculpt a voxel structure using your hands! Pinch to select a face, then move your hand to extrude or carve.
-    </p>
+    <p class="description">Sculpt a voxel structure using your hands! Pinch to select a face, then move your hand to extrude or carve.</p>
 
     <div class="container">
       <video class="input_video"></video>
@@ -281,14 +279,7 @@
       // Orthographic camera for overlay on video
       const frustumSize = 1;
       let aspect = 1280 / 720;
-      const threeCamera = new THREE.OrthographicCamera(
-        (frustumSize * aspect) / -2,
-        (frustumSize * aspect) / 2,
-        frustumSize / 2,
-        frustumSize / -2,
-        0.01,
-        100
-      );
+      const threeCamera = new THREE.OrthographicCamera((frustumSize * aspect) / -2, (frustumSize * aspect) / 2, frustumSize / 2, frustumSize / -2, 0.01, 100);
       threeCamera.position.set(0, 0, 1);
       threeCamera.lookAt(0, 0, 0);
 
@@ -367,11 +358,7 @@
 
       // Convert grid coordinates to world position
       function gridToWorld(x, y, z) {
-        return new THREE.Vector3(
-          x * VOXEL_SIZE,
-          y * VOXEL_SIZE,
-          z * VOXEL_SIZE
-        );
+        return new THREE.Vector3(x * VOXEL_SIZE, y * VOXEL_SIZE, z * VOXEL_SIZE);
       }
 
       // Convert world position to grid coordinates
@@ -459,15 +446,15 @@
       function getFaceDirection(faceIndex) {
         // BoxGeometry face indices: 0-1: +x, 2-3: -x, 4-5: +y, 6-7: -y, 8-9: +z, 10-11: -z
         const faceDirections = [
-          { x: 1, y: 0, z: 0 },  // +X
+          { x: 1, y: 0, z: 0 }, // +X
           { x: 1, y: 0, z: 0 },
           { x: -1, y: 0, z: 0 }, // -X
           { x: -1, y: 0, z: 0 },
-          { x: 0, y: 1, z: 0 },  // +Y
+          { x: 0, y: 1, z: 0 }, // +Y
           { x: 0, y: 1, z: 0 },
           { x: 0, y: -1, z: 0 }, // -Y
           { x: 0, y: -1, z: 0 },
-          { x: 0, y: 0, z: 1 },  // +Z
+          { x: 0, y: 0, z: 1 }, // +Z
           { x: 0, y: 0, z: 1 },
           { x: 0, y: 0, z: -1 }, // -Z
           { x: 0, y: 0, z: -1 },
@@ -512,7 +499,7 @@
 
       // Pinch detection threshold
       const PINCH_THRESHOLD = 0.07;
-      const PINCH_RELEASE_THRESHOLD = 0.10;
+      const PINCH_RELEASE_THRESHOLD = 0.1;
       let isPinching = false;
 
       // --- COORDINATE CONVERSION ---
@@ -568,7 +555,9 @@
       function getFaceCenter(faceLandmarks) {
         if (!faceLandmarks) return null;
 
-        let sumX = 0, sumY = 0, sumZ = 0;
+        let sumX = 0,
+          sumY = 0,
+          sumZ = 0;
         for (const lm of faceLandmarks) {
           sumX += lm.x;
           sumY += lm.y;
@@ -586,8 +575,10 @@
       function getFaceSize(faceLandmarks) {
         if (!faceLandmarks) return 0;
 
-        let minX = Infinity, maxX = -Infinity;
-        let minY = Infinity, maxY = -Infinity;
+        let minX = Infinity,
+          maxX = -Infinity;
+        let minY = Infinity,
+          maxY = -Infinity;
 
         for (const lm of faceLandmarks) {
           minX = Math.min(minX, lm.x);
@@ -620,7 +611,7 @@
         const ndcY = -(pinchPos.y * 2 - 1);
 
         raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), threeCamera);
-        
+
         // Get all voxel meshes as array for raycasting
         const meshArray = Array.from(voxelMeshes.values());
         const intersects = raycaster.intersectObjects(meshArray);
@@ -690,7 +681,7 @@
               if (addVoxel(newX, newY, newZ)) {
                 // Update selection to the new voxel
                 sculptingState.selectedVoxel = { x: newX, y: newY, z: newZ };
-                
+
                 // Update highlight
                 if (sculptingState.highlightedMesh) {
                   sculptingState.highlightedMesh.material = voxelMaterial.clone();
