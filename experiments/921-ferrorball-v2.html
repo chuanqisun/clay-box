@@ -191,8 +191,8 @@
     <div id="overlay">
       <h1>🧲 Ferrofluid Face V2</h1>
       <p>
-        Your face becomes a ball of ferrofluid overlaid on your video, and your hands are powerful magnets.
-        Move your hands close to your face to see dramatic spike patterns emerge!
+        Your face becomes a ball of ferrofluid overlaid on your video, and your hands are powerful magnets. Move your hands close to your face to see dramatic
+        spike patterns emerge!
       </p>
       <button class="start-btn">Click to Start</button>
     </div>
@@ -200,10 +200,7 @@
     <div id="loading">Loading...</div>
 
     <h1>Ferrofluid Face V2 - Enhanced Hand Attraction</h1>
-    <p class="description">
-      The ferrofluid ball is overlaid on your video stream. Move your hands near your face to see
-      dramatic magnetic attraction effects!
-    </p>
+    <p class="description">The ferrofluid ball is overlaid on your video stream. Move your hands near your face to see dramatic magnetic attraction effects!</p>
 
     <div class="container">
       <video class="input_video"></video>
@@ -284,14 +281,7 @@
       // Orthographic camera for overlay on video
       const frustumSize = 1;
       let aspect = 1280 / 720;
-      const camera = new THREE.OrthographicCamera(
-        (frustumSize * aspect) / -2,
-        (frustumSize * aspect) / 2,
-        frustumSize / 2,
-        frustumSize / -2,
-        0.01,
-        100
-      );
+      const camera = new THREE.OrthographicCamera((frustumSize * aspect) / -2, (frustumSize * aspect) / 2, frustumSize / 2, frustumSize / -2, 0.01, 100);
       camera.position.set(0, 0, 1);
       camera.lookAt(0, 0, 0);
 
@@ -312,15 +302,12 @@
 
       // --- LOAD HDRI ENVIRONMENT ---
       const rgbeLoader = new RGBELoader();
-      rgbeLoader.load(
-        "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/studio_small_09_1k.hdr",
-        (texture) => {
-          const envMap = pmremGenerator.fromEquirectangular(texture).texture;
-          scene.environment = envMap;
-          texture.dispose();
-          loadingEl.style.opacity = "0";
-        }
-      );
+      rgbeLoader.load("https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/studio_small_09_1k.hdr", (texture) => {
+        const envMap = pmremGenerator.fromEquirectangular(texture).texture;
+        scene.environment = envMap;
+        texture.dispose();
+        loadingEl.style.opacity = "0";
+      });
 
       // --- FERROFLUID SHADER (ENHANCED FOR DRAMATIC HAND ATTRACTION) ---
       const ferrofluidVertexShader = `
@@ -545,10 +532,10 @@
 
       // --- CREATE FERROFLUID SPHERE ---
       const sphereGeometry = new THREE.IcosahedronGeometry(1, 48);
-      
+
       const ferrofluidUniforms = {
         uTime: { value: 0 },
-        uForce: { value: 1.2 },  // ENHANCED: Higher default force
+        uForce: { value: 1.2 }, // ENHANCED: Higher default force
         uDensity: { value: 4.0 },
         uSharpness: { value: 0.4 },
         uMagnet1: { value: new THREE.Vector3(10, 0, 0) },
@@ -596,8 +583,7 @@
 
       // --- MEDIAPIPE HOLISTIC SETUP ---
       const holistic = new Holistic({
-        locateFile: (file) =>
-          `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${file}`,
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${file}`,
       });
 
       holistic.setOptions({
@@ -612,14 +598,16 @@
       // Calculate center of landmarks
       function getLandmarksCenter(landmarks) {
         if (!landmarks || landmarks.length === 0) return null;
-        
-        let sumX = 0, sumY = 0, sumZ = 0;
+
+        let sumX = 0,
+          sumY = 0,
+          sumZ = 0;
         for (const lm of landmarks) {
           sumX += lm.x;
           sumY += lm.y;
           sumZ += lm.z || 0;
         }
-        
+
         return {
           x: sumX / landmarks.length,
           y: sumY / landmarks.length,
@@ -630,17 +618,19 @@
       // Calculate bounding box size of landmarks
       function getLandmarksSize(landmarks) {
         if (!landmarks || landmarks.length === 0) return 0;
-        
-        let minX = Infinity, maxX = -Infinity;
-        let minY = Infinity, maxY = -Infinity;
-        
+
+        let minX = Infinity,
+          maxX = -Infinity;
+        let minY = Infinity,
+          maxY = -Infinity;
+
         for (const lm of landmarks) {
           minX = Math.min(minX, lm.x);
           maxX = Math.max(maxX, lm.x);
           minY = Math.min(minY, lm.y);
           maxY = Math.max(maxY, lm.y);
         }
-        
+
         return Math.max(maxX - minX, maxY - minY);
       }
 
@@ -655,7 +645,7 @@
           canvasCtx.restore();
         } else {
           canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-          canvasCtx.fillStyle = '#000';
+          canvasCtx.fillStyle = "#000";
           canvasCtx.fillRect(0, 0, canvasElement.width, canvasElement.height);
         }
 
@@ -770,7 +760,7 @@
           // Position the sphere at face location in orthographic space
           const facePos = normalizedToOrtho(faceCenter.x, faceCenter.y, faceCenter.z);
           ferrofluidSphere.position.copy(facePos);
-          
+
           // Scale sphere based on face size
           // faceSize is typically 0.1-0.3 in normalized coords
           // We want the sphere to roughly cover the face
@@ -791,16 +781,16 @@
           const dx = leftHandPos.x - faceCenter.x;
           const dy = leftHandPos.y - faceCenter.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
-          
+
           // ENHANCED: Use larger interaction zone and steeper falloff curve
           // handRangeMultiplier controls how far away the hand can be and still affect
           const normalizedDist = dist / (faceSize * handRangeMultiplier);
-          
+
           // ENHANCED: Use root curve (power < 1) for earlier response when hand approaches
           // Values rise faster from 0, making effect noticeable at greater distances
           const rawInfluence = Math.max(0, 1 - normalizedDist);
           const influence = Math.pow(rawInfluence, 0.6);
-          
+
           ferrofluidUniforms.uMagnet1Distance.value = influence;
         } else {
           ferrofluidUniforms.uMagnet1Active.value = 0.0;
@@ -817,12 +807,12 @@
           const dx = rightHandPos.x - faceCenter.x;
           const dy = rightHandPos.y - faceCenter.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
-          
+
           // ENHANCED: Same enhanced interaction zone as left hand
           const normalizedDist = dist / (faceSize * handRangeMultiplier);
           const rawInfluence = Math.max(0, 1 - normalizedDist);
           const influence = Math.pow(rawInfluence, 0.6);
-          
+
           ferrofluidUniforms.uMagnet2Distance.value = influence;
         } else {
           ferrofluidUniforms.uMagnet2Active.value = 0.0;
