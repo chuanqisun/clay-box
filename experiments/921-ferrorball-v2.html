@@ -405,31 +405,34 @@
           return 42.0 * dot(m*m, vec4(dot(p0,x0), dot(p1,x1), dot(p2,x2), dot(p3,x3)));
         }
 
-        float getMagnetInfluence(vec3 pos, vec3 magnetPos, float magnetActive, float magnetDistance) {
+        float getMagnetInfluence(vec3 pos, vec3 magnetPos, float magnetActive, float magnetDistance, out float directionalFactor) {
+          directionalFactor = 0.0;
           if (magnetActive < 0.5) return 0.0;
           
-          // Calculate direction from sphere surface to magnet
-          vec3 toMagnet = magnetPos - pos;
-          float dist = length(toMagnet);
+          // Calculate direction from sphere center (origin) to magnet
+          vec3 toMagnet = normalize(magnetPos);
           
-          // Influence falls off with distance
-          // magnetDistance controls how close the hand is (0 = far, 1 = touching)
+          // How much this vertex faces the magnet (1 = directly facing, 0 = perpendicular, -1 = opposite)
+          float facing = dot(normalize(pos), toMagnet);
+          
+          // Only affect vertices on the hemisphere facing the magnet
+          // Use smoothstep for gradual falloff from facing side to back
+          float hemisphereInfluence = smoothstep(-0.3, 0.8, facing);
+          
+          // Extra boost for vertices directly facing the magnet
+          float directBoost = pow(max(0.0, facing), 2.0);
+          
+          // Combine hemisphere mask with direct facing boost
+          directionalFactor = hemisphereInfluence * (0.4 + 0.6 * directBoost);
+          
+          // Proximity controls overall strength (0 = far, 1 = touching)
           float proximity = magnetDistance;
           
-          // ENHANCED: Use square root curve for earlier response at distance
-          // sqrt(x) grows faster at low values, making effect start sooner when hand approaches
+          // Use square root curve for earlier response at distance
           float scaledProximity = pow(proximity, 0.5) * 2.0;
           
-          // Spikes should form towards the magnet
-          // Use dot product to favor spikes pointing at magnet
-          vec3 magnetDir = normalize(toMagnet);
-          float alignment = max(0.0, dot(normalize(pos), magnetDir));
-          
-          // ENHANCED: Stronger alignment bonus when close
-          float alignmentBoost = mix(0.3, 0.8, proximity);
-          
-          // Combine proximity and alignment for spike formation
-          float influence = scaledProximity * (alignmentBoost + (1.0 - alignmentBoost) * alignment);
+          // Final influence is proximity * directional factor
+          float influence = scaledProximity * directionalFactor;
           
           return influence;
         }
@@ -441,46 +444,55 @@
           // Base noise for organic movement
           float baseNoise = snoise(pos * uDensity + uTime * 0.5);
           
-          // Calculate magnet influences
-          float magnet1Influence = getMagnetInfluence(pos, uMagnet1, uMagnet1Active, uMagnet1Distance);
-          float magnet2Influence = getMagnetInfluence(pos, uMagnet2, uMagnet2Active, uMagnet2Distance);
+          // Calculate magnet influences with directional factors
+          float dir1, dir2;
+          float magnet1Influence = getMagnetInfluence(pos, uMagnet1, uMagnet1Active, uMagnet1Distance, dir1);
+          float magnet2Influence = getMagnetInfluence(pos, uMagnet2, uMagnet2Active, uMagnet2Distance, dir2);
           
-          // ENHANCED: Combine influences with weighted addition (second magnet at 70% to prevent over-saturation)
+          // Combine influences
           float totalMagnetInfluence = magnet1Influence + magnet2Influence * 0.7;
+          float totalDirectional = max(dir1, dir2);
           
           // When magnets are active, create spike patterns
-          float spikeNoise = snoise(pos * uDensity * 2.0 + uTime);
+          // Modulate spike noise frequency based on direction - tighter spikes facing magnet
+          float spikeFreq = uDensity * 2.0 + totalDirectional * 1.5;
+          float spikeNoise = snoise(pos * spikeFreq + uTime);
           float spikes = pow(abs(spikeNoise), uSharpness);
           
-          // ENHANCED: Add secondary noise layer for more complex spikes
+          // Secondary noise layer for more complex spikes
           float spikeNoise2 = snoise(pos * uDensity * 4.0 - uTime * 0.7);
           float spikes2 = pow(abs(spikeNoise2), uSharpness * 1.5);
           
-          // Blend spike patterns
-          float combinedSpikes = spikes + spikes2 * 0.4;
+          // Blend spike patterns - weight by directional factor
+          float combinedSpikes = spikes + spikes2 * 0.4 * totalDirectional;
           
           // Blend between calm and spiked states
           float displacement = 0.0;
           
-          // Always have subtle movement
-          displacement += baseNoise * 0.02;
+          // Subtle ambient movement (reduced on sides facing magnet to emphasize spikes)
+          float ambientScale = mix(0.02, 0.005, totalDirectional);
+          displacement += baseNoise * ambientScale;
           
-          // ENHANCED: Much stronger spike response to magnets
+          // Directional spike response to magnets
           displacement += combinedSpikes * uForce * totalMagnetInfluence * 1.5;
           
-          // ENHANCED: Add directional pull towards nearest magnet when very close
+          // Calculate pull direction towards magnets (weighted by influence)
           vec3 pullDirection = vec3(0.0);
-          if (uMagnet1Active > 0.5 && uMagnet1Distance > 0.5) {
-            pullDirection += normalize(uMagnet1 - pos) * uMagnet1Distance * 0.15;
+          if (uMagnet1Active > 0.5 && uMagnet1Distance > 0.3) {
+            vec3 toMagnet1 = normalize(uMagnet1);
+            float pullStrength = uMagnet1Distance * dir1 * 0.2;
+            pullDirection += toMagnet1 * pullStrength;
           }
-          if (uMagnet2Active > 0.5 && uMagnet2Distance > 0.5) {
-            pullDirection += normalize(uMagnet2 - pos) * uMagnet2Distance * 0.15;
+          if (uMagnet2Active > 0.5 && uMagnet2Distance > 0.3) {
+            vec3 toMagnet2 = normalize(uMagnet2);
+            float pullStrength = uMagnet2Distance * dir2 * 0.2;
+            pullDirection += toMagnet2 * pullStrength;
           }
           
           // Displace along normal plus pull direction
           pos += norm * displacement + pullDirection;
           
-          vDisplacement = displacement;
+          vDisplacement = displacement + length(pullDirection);
           vNormal = normalMatrix * norm;
           vPosition = (modelViewMatrix * vec4(pos, 1.0)).xyz;
 
