@@ -174,8 +174,17 @@
       let camera = null;
       let webcamRunning = false;
 
-      // Fixed box size (adjustable via slider)
+      // Box size multiplier (adjustable via slider)
       let BOX_SIZE = 0.25;
+      
+      // Landmark indices (from MediaPipe Holistic pose landmarks)
+      const LEFT_SHOULDER_INDEX = 11;
+      const RIGHT_SHOULDER_INDEX = 12;
+      
+      // Scale factor to convert ear distance to appropriate box size
+      // The ear-to-ear distance is typically small in normalized coordinates,
+      // so we multiply by 4 to get a visually appropriate box size
+      const EAR_DISTANCE_SCALE_FACTOR = 4;
 
       // FPS calculation
       let lastTime = performance.now();
@@ -274,8 +283,8 @@
         return points;
       }
 
-      // --- POSITION AND ORIENT HEAD BOX (FIXED SIZE) ---
-      function positionAndOrientHeadBox(mesh, headPoints) {
+      // --- POSITION AND ORIENT HEAD BOX (DYNAMIC SIZE BASED ON LANDMARKS) ---
+      function positionAndOrientHeadBox(mesh, headPoints, shoulderPoints) {
         if (headPoints.length < 11) return;
 
         // Head landmarks from holistic pose (0-10):
@@ -299,29 +308,48 @@
         // Position mesh at head center
         mesh.position.copy(center);
 
-        // Set FIXED scale (uniform in all dimensions)
-        mesh.scale.set(BOX_SIZE, BOX_SIZE, BOX_SIZE);
+        // Calculate dynamic scale based on ear-to-ear distance (horizontal head width)
+        const leftEar = headPoints[7];
+        const rightEar = headPoints[8];
+        const earDistance = leftEar.distanceTo(rightEar);
+        
+        // Use ear distance as the base scale, with BOX_SIZE as a multiplier
+        const dynamicScale = earDistance * BOX_SIZE * EAR_DISTANCE_SCALE_FACTOR;
+        mesh.scale.set(dynamicScale, dynamicScale, dynamicScale);
 
         // Calculate orientation from head landmarks
         const nose = headPoints[0];
         const leftEye = headPoints[2];
         const rightEye = headPoints[5];
-        const leftEar = headPoints[7];
-        const rightEar = headPoints[8];
 
-        // Calculate head basis vectors
-        // Side vector: from right ear to left ear (or right eye to left eye)
+        // Side vector: from right ear to left ear (horizontal axis)
         const side = new THREE.Vector3().subVectors(leftEar, rightEar).normalize();
 
-        // Forward vector: from center of eyes to nose
-        const eyeCenter = new THREE.Vector3().addVectors(leftEye, rightEye).multiplyScalar(0.5);
-        const forward = new THREE.Vector3().subVectors(nose, eyeCenter).normalize();
+        // Calculate up vector using shoulders for proper upright orientation
+        // If shoulders are available, use them for a stable "up" reference
+        let up;
+        if (shoulderPoints && shoulderPoints.length >= 2) {
+          const leftShoulder = shoulderPoints[0];
+          const rightShoulder = shoulderPoints[1];
+          const shoulderCenter = new THREE.Vector3().addVectors(leftShoulder, rightShoulder).multiplyScalar(0.5);
+          const earCenter = new THREE.Vector3().addVectors(leftEar, rightEar).multiplyScalar(0.5);
+          
+          // Up vector: from shoulder center to ear center (pointing up along the head)
+          up = new THREE.Vector3().subVectors(earCenter, shoulderCenter).normalize();
+        } else {
+          // Fallback: use mouth-to-eye direction as approximate up
+          const mouthLeft = headPoints[9];
+          const mouthRight = headPoints[10];
+          const mouthCenter = new THREE.Vector3().addVectors(mouthLeft, mouthRight).multiplyScalar(0.5);
+          const eyeCenter = new THREE.Vector3().addVectors(leftEye, rightEye).multiplyScalar(0.5);
+          up = new THREE.Vector3().subVectors(eyeCenter, mouthCenter).normalize();
+        }
 
-        // Up vector: cross product of forward and side
-        const up = new THREE.Vector3().crossVectors(forward, side).normalize();
+        // Forward vector: perpendicular to side and up (pointing forward from face)
+        const forward = new THREE.Vector3().crossVectors(side, up).normalize();
 
-        // Recompute side to ensure orthogonality
-        side.crossVectors(up, forward).normalize();
+        // Recompute up to ensure orthogonality
+        up.crossVectors(forward, side).normalize();
 
         // Create rotation matrix
         const rotMatrix = new THREE.Matrix4();
@@ -379,9 +407,15 @@
         // Draw video frame
         canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
 
-        if (results.poseLandmarks && results.poseLandmarks.length > 10) {
+        if (results.poseLandmarks && results.poseLandmarks.length > RIGHT_SHOULDER_INDEX) {
           // Extract head landmarks (0-10)
           const headLandmarks = results.poseLandmarks.slice(0, 11);
+          
+          // Extract shoulder landmarks for orientation reference
+          const shoulderLandmarks = [
+            results.poseLandmarks[LEFT_SHOULDER_INDEX],
+            results.poseLandmarks[RIGHT_SHOULDER_INDEX]
+          ];
 
           // Draw Debug Skeleton (optional)
           if (showDebugCheckbox.checked) {
@@ -390,9 +424,10 @@
 
           // Convert landmarks to Three.js space
           const headPoints = convertToThreeJS(headLandmarks);
+          const shoulderPoints = convertToThreeJS(shoulderLandmarks);
 
-          // Position and orient head box with FIXED size
-          positionAndOrientHeadBox(headBoxMesh, headPoints);
+          // Position and orient head box with dynamic size based on landmarks
+          positionAndOrientHeadBox(headBoxMesh, headPoints, shoulderPoints);
         } else {
           headBoxMesh.visible = false;
         }
